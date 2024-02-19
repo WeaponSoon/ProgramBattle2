@@ -1,0 +1,22 @@
+{
+	"FileVersion": 3,
+	"EngineAssociation": "{BB7B690D-4E66-FCDE-B9DB-529B8D6A6738}",
+	"Category": "",
+	"Description": "",
+	"Modules": [
+		{
+			"Name": "ProgramBattle2",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		}
+	],
+	"Plugins": [
+		{
+			"Name": "ModelingToolsEditorMode",
+			"Enabled": true,
+			"TargetAllowList": [
+				"Editor"
+			]
+		}
+	]
+}
