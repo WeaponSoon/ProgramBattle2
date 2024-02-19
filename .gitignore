@@ -2,8 +2,10 @@ Binaries
 DerivedDataCache
 Intermediate
 Saved
+_ReSharper.Caches
 .vscode
 .vs
+.vsconfig
 *.VC.db
 *.opensdf
 *.opendb
