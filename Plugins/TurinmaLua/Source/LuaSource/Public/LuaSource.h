@@ -7,6 +7,8 @@
 #include "Modules/ModuleManager.h"
 #include "LuaSource.generated.h"
 
+DECLARE_DELEGATE_RetVal_TwoParams(bool, FOnLuaLoadFile, const FString&, FString&);
+
 UCLASS()
 class LUASOURCE_API ULuaState : public UObject
 {
@@ -23,7 +25,9 @@ struct FGlobalLuaVM
 
 class LUASOURCE_API FLuaSourceModule : public IModuleInterface
 {
+public:
 	static FGlobalLuaVM GLuaState;
+	static FOnLuaLoadFile OnLuaLoadFile;
 public:
 
 	static lua_State* GetState();
