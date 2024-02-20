@@ -9,6 +9,19 @@
 
 DECLARE_DELEGATE_RetVal_TwoParams(bool, FOnLuaLoadFile, const FString&, FString&);
 
+
+EXTERN_C
+{
+	struct GCObject;
+}
+
+namespace LuaCPPAPI
+{
+	void luaC_foreachgcobj(lua_State* L, void(*cb)(GCObject*,bool,lua_State*));
+	
+}
+
+
 UCLASS()
 class LUASOURCE_API ULuaState : public UObject
 {
