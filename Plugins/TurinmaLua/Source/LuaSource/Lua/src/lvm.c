@@ -30,7 +30,10 @@
 #include "ltm.h"
 #include "lvm.h"
 
+static void dummy_lock(lua_State* L){/*do nothing*/ }
 
+tlua_lockcb glua_lockcb = dummy_lock;
+tlua_lockcb glua_unlockcb = dummy_lock;
 /*
 ** By default, use jump tables in the main interpreter loop on gcc
 ** and compatible compilers.

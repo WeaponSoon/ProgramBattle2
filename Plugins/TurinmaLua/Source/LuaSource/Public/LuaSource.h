@@ -17,16 +17,41 @@ EXTERN_C
 
 namespace LuaCPPAPI
 {
-	void luaC_foreachgcobj(lua_State* L, void(*cb)(GCObject*,bool,lua_State*));
+	void luaC_foreachgcobj(lua_State* L, TFunction<void(GCObject*, bool, lua_State*)> cb);
 	
 }
 
 
-UCLASS()
-class LUASOURCE_API ULuaState : public UObject
+UCLASS(BlueprintType, MinimalAPI)
+class ULuaState : public UObject
 {
 	GENERATED_BODY()
 
+
+	friend void LuaLock(lua_State*);
+	friend void LuaUnLock(lua_State*);
+	lua_State* InnerState = nullptr;
+	
+	static thread_local uint64 LocalThreadId;
+	static thread_local uint64 EnterCount;
+	
+	uint64 LockedThreadId = 0xffffffffffffffff;
+	std::atomic_flag LuaAt = ATOMIC_FLAG_INIT;
+
+	void OnCollectLuaRefs(FReferenceCollector& Collector, GCObject* o, bool w, lua_State* l);
+	void LockLua();
+	void UnlockLua();
+public:
+
+	virtual void BeginDestroy() override;
+
+	UFUNCTION(BlueprintCallable)
+	LUASOURCE_API void Init();
+
+	UFUNCTION(BlueprintCallable)
+	LUASOURCE_API void Finalize();
+
+	LUASOURCE_API static void AddReferencedObjects(UObject* InThis, FReferenceCollector& Collector);
 };
 
 
@@ -39,11 +64,8 @@ struct FGlobalLuaVM
 class LUASOURCE_API FLuaSourceModule : public IModuleInterface
 {
 public:
-	static FGlobalLuaVM GLuaState;
 	static FOnLuaLoadFile OnLuaLoadFile;
 public:
-
-	static lua_State* GetState();
 
 	/** IModuleInterface implementation */
 	virtual void StartupModule() override;

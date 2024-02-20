@@ -3,6 +3,7 @@
 #include "LuaSource.h"
 #include "lua.hpp"
 #include <string>
+#include <thread>
 #include <unordered_map>
 
 
@@ -34,7 +35,7 @@ UE_DISABLE_OPTIMIZATION
 
 
 
-static void travelluaobj(global_State* g, GCObject* o, void(*cb)(GCObject*, bool, lua_State*), std::unordered_map<GCObject*, bool>& visited, bool strong);
+static void travelluaobj(global_State* g, GCObject* o, TFunction<void(GCObject*, bool, lua_State*)>& cb, std::unordered_map<GCObject*, bool>& visited, bool strong);
 
 
 
@@ -44,7 +45,7 @@ static void travelluaobj(global_State* g, GCObject* o, void(*cb)(GCObject*, bool
 ** atomic phase. In the atomic phase, if table has any white value,
 ** put it in 'weak' list, to be cleared.
 */
-static void traverseweakvalue(global_State* g, Table* h, void(*cb)(GCObject*, bool, lua_State*), std::unordered_map<GCObject*, bool>& visited, bool strong) {
+static void traverseweakvalue(global_State* g, Table* h, TFunction<void(GCObject*, bool, lua_State*)>& cb, std::unordered_map<GCObject*, bool>& visited, bool strong) {
 
 
     unsigned int asize = luaH_realasize(h);
@@ -75,7 +76,7 @@ static void traverseweakvalue(global_State* g, Table* h, void(*cb)(GCObject*, bo
 }
 
 
-static void traverseallweaktable(global_State* g, Table* h, void(*cb)(GCObject*, bool, lua_State*), std::unordered_map<GCObject*, bool>& visited, bool strong) {
+static void traverseallweaktable(global_State* g, Table* h, TFunction<void(GCObject*, bool, lua_State*)>& cb, std::unordered_map<GCObject*, bool>& visited, bool strong) {
 
 
     unsigned int asize = luaH_realasize(h);
@@ -106,7 +107,7 @@ static void traverseallweaktable(global_State* g, Table* h, void(*cb)(GCObject*,
 }
 
 
-static void traverseweakkey(global_State* g, Table* h, int inv, void(*cb)(GCObject*, bool, lua_State*), std::unordered_map<GCObject*, bool>& visited, bool strong) {
+static void traverseweakkey(global_State* g, Table* h, int inv, TFunction<void(GCObject*, bool, lua_State*)>& cb, std::unordered_map<GCObject*, bool>& visited, bool strong) {
 
 
     int marked = 0;  /* true if an object is marked in this traversal */
@@ -140,7 +141,7 @@ static void traverseweakkey(global_State* g, Table* h, int inv, void(*cb)(GCObje
 }
 
 
-static void traversestrongtable(global_State* g, Table* h, void(*cb)(GCObject*, bool, lua_State*), std::unordered_map<GCObject*, bool>& visited, bool strong) {
+static void traversestrongtable(global_State* g, Table* h, TFunction<void(GCObject*, bool, lua_State*)>& cb, std::unordered_map<GCObject*, bool>& visited, bool strong) {
 
     Node* n, * limit = gnodelast(h);
     unsigned int i;
@@ -169,7 +170,7 @@ static void traversestrongtable(global_State* g, Table* h, void(*cb)(GCObject*, 
 }
 
 
-static void traversetable(global_State* g, Table* h, void(*cb)(GCObject*, bool, lua_State*), std::unordered_map<GCObject*, bool>& visited, bool strong) {
+static void traversetable(global_State* g, Table* h, TFunction<void(GCObject*, bool, lua_State*)>& cb, std::unordered_map<GCObject*, bool>& visited, bool strong) {
 
 
     auto&& res = visited.emplace(obj2gco(h), strong);
@@ -214,7 +215,7 @@ static void traversetable(global_State* g, Table* h, void(*cb)(GCObject*, bool, 
 }
 
 
-static void traverseudata(global_State* g, Udata* u, void(*cb)(GCObject*, bool, lua_State*), std::unordered_map<GCObject*, bool>& visited, bool strong) {
+static void traverseudata(global_State* g, Udata* u, TFunction<void(GCObject*, bool, lua_State*)>& cb, std::unordered_map<GCObject*, bool>& visited, bool strong) {
 
     auto&& res = visited.emplace(obj2gco(u), strong);
 
@@ -257,7 +258,7 @@ static void traverseudata(global_State* g, Udata* u, void(*cb)(GCObject*, bool, 
 ** arrays can be larger than needed; the extra slots are filled with
 ** NULL, so the use of 'markobjectN')
 */
-static void traverseproto(global_State* g, Proto* f, void(*cb)(GCObject*, bool, lua_State*), std::unordered_map<GCObject*, bool>& visited, bool strong) {
+static void traverseproto(global_State* g, Proto* f, TFunction<void(GCObject*, bool, lua_State*)>& cb, std::unordered_map<GCObject*, bool>& visited, bool strong) {
 
 
     auto&& res = visited.emplace(obj2gco(f), strong);
@@ -315,7 +316,7 @@ static void traverseproto(global_State* g, Proto* f, void(*cb)(GCObject*, bool, 
 }
 
 
-static void traverseCclosure(global_State* g, CClosure* cl, void(*cb)(GCObject*, bool, lua_State*), std::unordered_map<GCObject*, bool>& visited, bool strong) {
+static void traverseCclosure(global_State* g, CClosure* cl, TFunction<void(GCObject*, bool, lua_State*)>& cb, std::unordered_map<GCObject*, bool>& visited, bool strong) {
 
     auto&& res = visited.emplace(obj2gco(cl), strong);
 
@@ -355,7 +356,7 @@ static void traverseCclosure(global_State* g, CClosure* cl, void(*cb)(GCObject*,
 ** Traverse a Lua closure, marking its prototype and its upvalues.
 ** (Both can be NULL while closure is being created.)
 */
-static void traverseLclosure(global_State* g, LClosure* cl, void(*cb)(GCObject*, bool, lua_State*), std::unordered_map<GCObject*, bool>& visited, bool strong) {
+static void traverseLclosure(global_State* g, LClosure* cl, TFunction<void(GCObject*, bool, lua_State*)>& cb, std::unordered_map<GCObject*, bool>& visited, bool strong) {
 
     auto&& res = visited.emplace(obj2gco(cl), strong);
 
@@ -401,7 +402,7 @@ static void traverseLclosure(global_State* g, LClosure* cl, void(*cb)(GCObject*,
 ** (which can only happen in generational mode) or if the traverse is in
 ** the propagate phase (which can only happen in incremental mode).
 */
-static void traversethread(global_State* g, lua_State* th, void(*cb)(GCObject*, bool, lua_State*), std::unordered_map<GCObject*, bool>& visited, bool strong) {
+static void traversethread(global_State* g, lua_State* th, TFunction<void(GCObject*, bool, lua_State*)>& cb, std::unordered_map<GCObject*, bool>& visited, bool strong) {
 
 
     auto&& res = visited.emplace(obj2gco(th), strong);
@@ -453,7 +454,7 @@ static void traversethread(global_State* g, lua_State* th, void(*cb)(GCObject*, 
 /*
 ** traverse one gray object, turning it to black.
 */
-static void travelluaobj(global_State* g, GCObject* o, void(*cb)(GCObject*, bool, lua_State*), std::unordered_map<GCObject*, bool>& visited, bool strong) {
+static void travelluaobj(global_State* g, GCObject* o, TFunction<void(GCObject*, bool, lua_State*)>& cb, std::unordered_map<GCObject*, bool>& visited, bool strong) {
     if(!o)
     {
         return;
@@ -494,23 +495,11 @@ static void travelluaobj(global_State* g, GCObject* o, void(*cb)(GCObject*, bool
 }
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-void LuaCPPAPI::luaC_foreachgcobj(lua_State* L, void(*cb)(GCObject*,bool, lua_State*))
+void LuaCPPAPI::luaC_foreachgcobj(lua_State* L, TFunction<void(GCObject*, bool, lua_State*)> cb)
 {
     if(cb)
     {
+        lua_lock(L);
         global_State* g = L->l_G;
         std::unordered_map<GCObject*, bool> ObjectHasVisit;
 
@@ -527,6 +516,7 @@ void LuaCPPAPI::luaC_foreachgcobj(lua_State* L, void(*cb)(GCObject*,bool, lua_St
             
             travelluaobj(g, o, cb, ObjectHasVisit, true);
         }
+        lua_unlock(L);
     }
 }
 
@@ -552,18 +542,9 @@ void LuaCPPAPI::luaC_foreachgcobj(lua_State* L, void(*cb)(GCObject*,bool, lua_St
 //    ////lua_register(State, "require", Global_Require);
 //}
 
-FGlobalLuaVM FLuaSourceModule::GLuaState;
 
-lua_State* FLuaSourceModule::GetState()
+void AddUsefulLuaTableWithMetatableToTable(lua_State* L, const char* tableId, int32 Index, bool Weak, const char* metatableName = nullptr)
 {
-    return GLuaState.L;
-}
-
-void AddUsefulLuaTableWithMetatableToTable(const char* tableId, int32 Index, bool Weak, const char* metatableName = nullptr)
-{
-    auto* L = FLuaSourceModule::GetState();
-
-    
     lua_pushstring(L, tableId);// "..."
     
     lua_newtable(L);//"...", table
@@ -591,7 +572,7 @@ void AddUsefulLuaTableWithMetatableToTable(const char* tableId, int32 Index, boo
 }
 FOnLuaLoadFile FLuaSourceModule::OnLuaLoadFile;
 
-static int CustomLoader(lua_State* L)
+static int CustomLoaderInternal(lua_State* L, bool bForceDefaultLoader)
 {
     const char* ModuleName = luaL_checkstring(L, 1);
     FString ModuleNameStr = UTF8_TO_TCHAR(ModuleName);
@@ -603,10 +584,10 @@ static int CustomLoader(lua_State* L)
 
     FString Result;
     bool bLoadSuc = false;
-    if(FLuaSourceModule::OnLuaLoadFile.IsBound())
+    if (!bForceDefaultLoader && FLuaSourceModule::OnLuaLoadFile.IsBound())
     {
         bLoadSuc = FLuaSourceModule::OnLuaLoadFile.Execute(ModuleNameStr, Result);
-        if(!bLoadSuc)
+        if (!bLoadSuc)
         {
             lua_pushstring(L, "module load failed");
             return 1; // File not found
@@ -615,22 +596,22 @@ static int CustomLoader(lua_State* L)
     else
     {
         ModuleNameStr.ReplaceCharInline(TEXT('.'), TEXT('/'));
-        if(!ModuleNameStr.StartsWith(TEXT("/" )))
+        if (!ModuleNameStr.StartsWith(TEXT("/")))
         {
             ModuleNameStr.InsertAt(0, TEXT('/'));
         }
         FString FileName;
-        if(!FPackageName::TryConvertLongPackageNameToFilename(ModuleNameStr, FileName, TEXT(".lua")))
+        if (!FPackageName::TryConvertLongPackageNameToFilename(ModuleNameStr, FileName, TEXT(".lua")))
         {
             ModuleNameStr.InsertAt(0, TEXT("/Game"));
-	        if(!FPackageName::TryConvertLongPackageNameToFilename(ModuleNameStr, FileName, TEXT(".lua")))
-	        {
+            if (!FPackageName::TryConvertLongPackageNameToFilename(ModuleNameStr, FileName, TEXT(".lua")))
+            {
                 lua_pushstring(L, "module name is invalid");
                 return 1; // File not found
-	        }
+            }
         }
-        
-        if(!FFileHelper::LoadFileToString(Result, *FileName))
+
+        if (!FFileHelper::LoadFileToString(Result, *FileName))
         {
             lua_pushstring(L, "module load failed");
             return 1; // File not found
@@ -651,13 +632,23 @@ static int CustomLoader(lua_State* L)
     return 2;
 }
 
-void RegisterCustomLoader(lua_State* L)
+static int CustomLoader(lua_State* L)
+{
+    return CustomLoaderInternal(L, false);
+}
+
+static int CustomDefaultLoader(lua_State* L)
+{
+    return CustomLoaderInternal(L, true);
+}
+
+void RegisterCustomLoader(lua_State* L, bool bDefualt)
 {
     lua_getglobal(L, "package");
     lua_getfield(L, -1, "searchers");
 
     lua_pushinteger(L, 2);
-    lua_pushcfunction(L, CustomLoader);
+    lua_pushcfunction(L, bDefualt ? CustomDefaultLoader : CustomLoader);
     lua_settable(L, -3);
 
     lua_pop(L, 2); // Pop 'searchers' and 'package' tables
@@ -760,39 +751,118 @@ void OnTravelLuaGCObject(GCObject* o, bool strong, lua_State* L)
     }
 }
 
+void ULuaState::OnCollectLuaRefs(FReferenceCollector& Collector, GCObject* o, bool w, lua_State* l)
+{
+
+}
+
+static std::atomic_uint64_t GlobalThreadId = 0;
+
+thread_local uint64 ULuaState::LocalThreadId = 0xffffffffffffffff;
+thread_local uint64 ULuaState::EnterCount = 0;
+
+void ULuaState::LockLua()
+{
+    if(LocalThreadId == 0xffffffffffffffff)
+    {
+        LocalThreadId = GlobalThreadId.fetch_add(1);
+    }
+
+    if(LocalThreadId == LockedThreadId)
+    {
+        EnterCount++;
+    }
+    else
+    {
+        while (LuaAt.test_and_set()) {}
+        LockedThreadId = LocalThreadId;
+        EnterCount = 1;
+    }
+}
+
+void ULuaState::UnlockLua()
+{
+    if(--EnterCount == 0)
+    {
+        LockedThreadId = 0xffffffffffffffff;
+        LuaAt.clear();
+    }
+}
+
+void ULuaState::BeginDestroy()
+{
+	UObject::BeginDestroy();
+    Finalize();
+}
+
+void ULuaState::Init()
+{
+    LuaAt.clear();
+    InnerState = lua_newstate(&FLuaSourceModule::LuaMalloc, this);
+    lua_gc(InnerState, LUA_GCSTOP);
+    luaL_openlibs(InnerState);
+
+    RegisterCustomLoader(InnerState, true);
+
+    lua_getglobal(InnerState, "require");
+    lua_pushstring(InnerState, "TurinmaLua.Core.Init");
+    lua_call(InnerState, 1, LUA_MULTRET);
+    lua_pop(InnerState, lua_gettop(InnerState));
+
+    RegisterCustomLoader(InnerState, false);
+
+    AddUsefulLuaTableWithMetatableToTable(InnerState, "InternalUseOnly___*___UObjectExtensionWeakTable", LUA_REGISTRYINDEX, true);
+    AddUsefulLuaTableWithMetatableToTable(InnerState, "InternalUseOnly___*___UObjectExtensionStrongTable", LUA_REGISTRYINDEX, false);
+    lua_pop(InnerState, lua_gettop(InnerState));
+
+    LuaCPPAPI::luaC_foreachgcobj(InnerState, OnTravelLuaGCObject);
+}
+
+void ULuaState::Finalize()
+{
+    if(InnerState)
+    {
+        lua_close(InnerState);
+        InnerState = nullptr;
+    }
+}
+
+void ULuaState::AddReferencedObjects(UObject* InThis, FReferenceCollector& Collector)
+{
+    ULuaState* This = CastChecked<ULuaState>(InThis);
+    if(This->InnerState)
+    {
+        LuaCPPAPI::luaC_foreachgcobj(This->InnerState, [This, &Collector](GCObject* o, bool w, lua_State* l)->void
+            {
+                This->OnCollectLuaRefs(Collector, o, w, l);
+            });
+    }
+}
+
+void LuaLock(lua_State* L)
+{
+    if (G(L)->ud)
+    {
+        ULuaState* LuaState = (ULuaState*)(G(L)->ud);
+        LuaState->LockLua();
+    }
+}
+
+void LuaUnLock(lua_State* L)
+{
+    if(G(L)->ud)
+    {
+        ULuaState* LuaState = (ULuaState*)(G(L)->ud);
+        LuaState->UnlockLua();
+    }
+}
 
 void FLuaSourceModule::StartupModule()
 {
 	// This code will execute after your module is loaded into memory; the exact timing is specified in the .uplugin file per-module
-    FOnLuaLoadFile Temp = OnLuaLoadFile;
-    OnLuaLoadFile.Unbind();
-
-    GLuaState.L = lua_newstate(&FLuaSourceModule::LuaMalloc, nullptr);
-    lua_gc(GLuaState.L, LUA_GCSTOP);
-    luaL_openlibs(GLuaState.L);
-
-    RegisterCustomLoader(GLuaState.L);
-
-    lua_getglobal(GLuaState.L, "require");
-    lua_pushstring(GLuaState.L, "TurinmaLua.Core.Init");
-    lua_call(GLuaState.L, 1, LUA_MULTRET);
-
-    lua_pop(GLuaState.L, lua_gettop(GLuaState.L));
-
-
-    AddUsefulLuaTableWithMetatableToTable("InternalUseOnly___*___UObjectExtensionWeakTable", LUA_REGISTRYINDEX, true);
-    AddUsefulLuaTableWithMetatableToTable("InternalUseOnly___*___UObjectExtensionStrongTable", LUA_REGISTRYINDEX, false);
-    lua_pop(GLuaState.L, lua_gettop(GLuaState.L));
-	LuaCPPAPI::luaC_foreachgcobj(GLuaState.L, OnTravelLuaGCObject);
-
-    FCoreUObjectDelegates::GetPreGarbageCollectDelegate().AddLambda([]()->void
-    {
-            LuaCPPAPI::luaC_foreachgcobj(GLuaState.L, OnTravelLuaGCObject);
-    });
-    
-    FCoreUObjectDelegates::GetPostGarbageCollect();
-
-    OnLuaLoadFile = Temp;
+    //FCoreUObjectDelegates::GetPostGarbageCollect();
+    glua_lockcb = LuaLock;
+    glua_unlockcb = LuaUnLock;
 }
 
 void FLuaSourceModule::ShutdownModule()

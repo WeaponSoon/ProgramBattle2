@@ -255,14 +255,17 @@ typedef l_uint32 Instruction;
 #define LUAI_MAXCCALLS		200
 #endif
 
+typedef void(*tlua_lockcb)(lua_State* L);
+extern tlua_lockcb glua_lockcb;
+extern tlua_lockcb glua_unlockcb;
 
 /*
 ** macros that are executed whenever program enters the Lua core
 ** ('lua_lock') and leaves the core ('lua_unlock')
 */
 #if !defined(lua_lock)
-#define lua_lock(L)	((void) 0)
-#define lua_unlock(L)	((void) 0)
+#define lua_lock(L)	glua_lockcb(L)
+#define lua_unlock(L) glua_unlockcb(L)
 #endif
 
 /*
