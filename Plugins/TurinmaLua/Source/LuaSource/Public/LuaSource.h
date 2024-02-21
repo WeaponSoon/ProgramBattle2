@@ -22,6 +22,153 @@ namespace LuaCPPAPI
 }
 
 
+
+
+struct FLuaUStructRefData
+{
+	UScriptStruct* StructType;
+	void* PtrToData;
+
+	void Clear()
+	{
+		StructType = nullptr;
+		PtrToData = nullptr;
+	}
+
+	void SetRef(UScriptStruct* Tye, void* Data)
+	{
+		StructType = Tye;
+		PtrToData = Data;
+	}
+};
+
+struct FLuaUStructData
+{
+	static constexpr int32 MaxInlineSize = sizeof(FTransform) > sizeof(void*) ? sizeof(FTransform) : sizeof(void*);
+
+	UScriptStruct* StructType;
+	TAlignedBytes<MaxInlineSize, alignof(std::max_align_t)> InnerData;
+	bool bValid;
+
+	void Clear();
+
+	void CopyData(void* Data);
+
+	void SetData(UScriptStruct* Type, void* Data);
+
+	void* GetData();
+	
+	void AddReferencedObjects(UObject* Owner, FReferenceCollector& Collector, bool bStrong);
+};
+
+struct FLuaUObjectData
+{
+	UObject* Object;
+
+	void AddReferencedObjects(UObject* Owner, FReferenceCollector& Collector, bool bStrong);
+};
+
+
+enum class EUEDataType
+{
+	None,
+	Struct,
+	StructRef,
+	Object,
+};
+
+struct FLuaUEData : public TSharedFromThis<FLuaUEData>
+{
+	union
+	{
+		FLuaUStructRefData StructRef;
+		FLuaUStructData Struct;
+		FLuaUObjectData Object;
+	} Data;
+	EUEDataType DataType = EUEDataType::None;
+
+	FLuaUEData()
+	{
+		FMemory::Memzero(&Data, sizeof(Data));
+	}
+
+	~FLuaUEData()
+	{
+		switch (DataType)
+		{
+		case EUEDataType::Struct:
+			Data.Struct.Clear();
+			break;
+		case EUEDataType::StructRef:
+			Data.StructRef.Clear();
+			break;
+		case EUEDataType::Object:
+			Data.Object.Object = nullptr;
+			break;
+		default:
+			break;
+		}
+	}
+};
+
+
+UCLASS(BlueprintType, MinimalAPI)
+class UCompleteObject : public UObject
+{
+	GENERATED_BODY()
+};
+
+UCLASS(BlueprintType, MinimalAPI)
+class ATestWeakRefPtr : public AActor
+{
+	GENERATED_BODY()
+
+	UObject* ObjTest;
+	UObject* WeakObjTest;
+
+	UFUNCTION(CallInEditor)
+	void ConstructObjectTest()
+	{
+		ObjTest = NewObject<UCompleteObject>();
+		WeakObjTest = NewObject<UCompleteObject>();
+	}
+	UFUNCTION(CallInEditor)
+	void ConstructObjectTestSame()
+	{
+		ObjTest = NewObject<UCompleteObject>();
+		WeakObjTest = ObjTest;
+	}
+	UFUNCTION(CallInEditor)
+	void ForceGC()
+	{
+		GEngine->ForceGarbageCollection();
+	}
+	UFUNCTION(CallInEditor)
+	void ClearStrong()
+	{
+		ObjTest = nullptr;
+	}
+	UFUNCTION(CallInEditor)
+	void ClearWeak()
+	{
+		WeakObjTest = nullptr;
+	}
+	UFUNCTION(CallInEditor)
+	void PrintPtr()
+	{
+		UE_LOG(LogTemp, Log, TEXT("weipengsong: Strong: %p, Weak: %p"), ObjTest, WeakObjTest);
+	}
+
+	static void AddReferencedObjects(UObject* InThis, FReferenceCollector& Collector)
+	{
+		auto* This = CastChecked<ATestWeakRefPtr>(InThis);
+		Collector.AddReferencedObject(This->ObjTest);
+		Collector.MarkWeakObjectReferenceForClearing(&This->WeakObjTest);
+	}
+
+};
+
+
 UCLASS(BlueprintType, MinimalAPI)
 class ULuaState : public UObject
 {
@@ -54,12 +201,6 @@ public:
 	LUASOURCE_API static void AddReferencedObjects(UObject* InThis, FReferenceCollector& Collector);
 };
 
-
-
-struct FGlobalLuaVM
-{
-	lua_State* L = nullptr;
-};
 
 class LUASOURCE_API FLuaSourceModule : public IModuleInterface
 {

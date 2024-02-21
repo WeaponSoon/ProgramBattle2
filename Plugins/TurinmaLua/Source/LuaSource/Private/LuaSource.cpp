@@ -751,6 +751,96 @@ void OnTravelLuaGCObject(GCObject* o, bool strong, lua_State* L)
     }
 }
 
+void FLuaUStructData::Clear()
+{
+    if (StructType && bValid)
+    {
+        StructType->DestroyStruct(GetData());
+    }
+    StructType = nullptr;
+    bValid = false;
+}
+
+void FLuaUStructData::CopyData(void* Data)
+{
+    if(StructType && bValid)
+    {
+        StructType->CopyScriptStruct(GetData(), Data);
+    }
+}
+
+void FLuaUStructData::SetData(UScriptStruct* Type, void* Data)
+{
+	if(StructType && bValid)
+	{
+        StructType->DestroyStruct(GetData());
+	}
+    StructType = Type;
+    bValid = false;
+
+    if(StructType)
+    {
+        if (StructType->GetStructureSize() > MaxInlineSize)
+        {
+            void* Mem = operator new(StructType->GetStructureSize());
+            StructType->InitializeDefaultValue((uint8*)Mem);
+            if(Data)
+            {
+                StructType->CopyScriptStruct(Mem, Data);
+            }
+        	*(void**)(&InnerData) = Mem;
+        }
+        else
+        {
+            StructType->InitializeDefaultValue((uint8*)&InnerData);
+            if(Data)
+            {
+                StructType->CopyScriptStruct(&InnerData, Data);
+            }
+        }
+        bValid = true;
+    }
+}
+
+void* FLuaUStructData::GetData()
+{
+    if(StructType && bValid)
+    {
+        if (StructType->GetStructureSize() > MaxInlineSize)
+        {
+            return *(void**)(&InnerData);
+        }
+        return &InnerData;
+    }
+    return nullptr;
+}
+
+void FLuaUStructData::AddReferencedObjects(UObject* Owner, FReferenceCollector& Collector, bool bStrong)
+{
+    if(StructType)
+    {
+        Collector.AddReferencedObject(StructType);
+        if(bValid)
+        {
+            FVerySlowReferenceCollectorArchiveScope Scope(Collector.GetVerySlowReferenceCollectorArchive(), Owner);
+            StructType->SerializeBin(Scope.GetArchive(), GetData());
+        }
+
+    }
+}
+
+void FLuaUObjectData::AddReferencedObjects(UObject* Owner, FReferenceCollector& Collector, bool bStrong)
+{
+    if(bStrong)
+    {
+        Collector.AddReferencedObject(Object);
+    }
+    else
+    {
+        Collector.MarkWeakObjectReferenceForClearing(&Object);
+    }
+}
+
 void ULuaState::OnCollectLuaRefs(FReferenceCollector& Collector, GCObject* o, bool w, lua_State* l)
 {
 
@@ -795,6 +885,31 @@ void ULuaState::BeginDestroy()
     Finalize();
 }
 
+
+int TurinmaTableIndex(lua_State* L)
+{
+    if(lua_isstring(L, 2))
+    {
+        FString Key = UTF8_TO_TCHAR(lua_tostring(L, 2));
+        Key.TrimStartAndEndInline();
+        if(!Key.IsEmpty())
+        {
+            if (!Key.StartsWith(TEXT("/")))
+            {
+                
+            }
+        }
+    }
+    return 0;
+}
+
+int TurinmaTableNewIndex(lua_State* L)
+{
+
+    return 0;
+}
+
+
 void ULuaState::Init()
 {
     LuaAt.clear();
@@ -804,16 +919,31 @@ void ULuaState::Init()
 
     RegisterCustomLoader(InnerState, true);
 
+    lua_newtable(InnerState);//TurinmaTable
+    lua_newtable(InnerState);//TurinmaTable, metatable
+    //lua_pushcfunction(InnerState,)
+
+
+    //lua_setglobal(InnerState, );
+
     lua_getglobal(InnerState, "require");
     lua_pushstring(InnerState, "TurinmaLua.Core.Init");
-    lua_call(InnerState, 1, LUA_MULTRET);
+
+    
+    lua_pcall(InnerState, 1, LUA_MULTRET,0);
     lua_pop(InnerState, lua_gettop(InnerState));
 
     RegisterCustomLoader(InnerState, false);
 
     AddUsefulLuaTableWithMetatableToTable(InnerState, "InternalUseOnly___*___UObjectExtensionWeakTable", LUA_REGISTRYINDEX, true);
     AddUsefulLuaTableWithMetatableToTable(InnerState, "InternalUseOnly___*___UObjectExtensionStrongTable", LUA_REGISTRYINDEX, false);
+
     lua_pop(InnerState, lua_gettop(InnerState));
+
+
+    
+
+
 
     LuaCPPAPI::luaC_foreachgcobj(InnerState, OnTravelLuaGCObject);
 }
@@ -830,6 +960,7 @@ void ULuaState::Finalize()
 void ULuaState::AddReferencedObjects(UObject* InThis, FReferenceCollector& Collector)
 {
     ULuaState* This = CastChecked<ULuaState>(InThis);
+
     if(This->InnerState)
     {
         LuaCPPAPI::luaC_foreachgcobj(This->InnerState, [This, &Collector](GCObject* o, bool w, lua_State* l)->void
