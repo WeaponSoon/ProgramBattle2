@@ -843,8 +843,26 @@ void FLuaUObjectData::AddReferencedObjects(UObject* Owner, FReferenceCollector& 
 
 void ULuaState::OnCollectLuaRefs(FReferenceCollector& Collector, GCObject* o, bool w, lua_State* l)
 {
-
+    if(o->tt == LUA_VUSERDATA)
+    {
+        Udata* u = gco2u(o);
+        if (u->nuvalue != 0 && u->metatable)
+        {  
+            auto metatableName = GetMetatableName(l, u->metatable);
+            if(metatableName && strcmp(metatableName, LuaUEDataMetatableName))
+            {
+                void* UD = getudatamem(u);
+                FLuaUEData* UEData = (FLuaUEData*)UD;
+                if(UEData)
+                {
+                    UEData->AddReferencedObjects(this, Collector, w);
+                }
+            }
+        }
+    }
 }
+
+
 
 static std::atomic_uint64_t GlobalThreadId = 0;
 
@@ -879,6 +897,94 @@ void ULuaState::UnlockLua()
     }
 }
 
+void ULuaState::PushLuaUEData(void* Value, UStruct* DataType, EUEDataType Type, TCustomMemoryHandle<FLuaUEData> Oter)
+{
+    if(Type == EUEDataType::None)
+    {
+        return;
+    }
+    if(ensure((Type != EUEDataType::StructRef && !Oter) || (Type == EUEDataType::StructRef && Oter)))
+    {
+        UScriptStruct* ScriptStruct = nullptr;
+        UClass* Class = nullptr;
+        UObject* Obj = nullptr;
+        switch (Type)
+        {
+        case EUEDataType::Struct:
+        case EUEDataType::StructRef:
+        {
+            ScriptStruct = Cast<UScriptStruct>(DataType);
+        	if(!ScriptStruct)
+            {
+                return;
+            }
+        }
+        break;
+        case EUEDataType::Object:
+        {
+            Class = Cast<UClass>(DataType);
+            Obj = (UObject*)Value;
+            if (!Class)
+            {
+                return;
+            }
+        }
+        break;
+        default:
+            check(0);
+        }
+
+        if(!ScriptStruct && !Class)
+        {
+            return;
+        }
+
+        if(Obj && !Obj->IsA(Class))
+        {
+            return;
+        }
+
+        FLuaUEData* LuaUD = (FLuaUEData*)lua_newuserdata(InnerState, sizeof(FLuaUEData));//ud
+        if(!LuaUD)
+        {
+            return;
+        }
+
+        LuaUD->DataType = Type;
+        LuaUD->Oter = Oter;
+
+        luaL_newmetatable(InnerState, LuaUEDataMetatableName); //ud, LuaUEDataMetatableName
+        lua_setmetatable(InnerState, -2);//ud
+
+	    switch (Type)
+	    {
+	    case EUEDataType::StructRef:
+		    {
+            LuaUD->Data.StructRef.SetRef(ScriptStruct, Value);
+		    }
+            break;
+	    case EUEDataType::Object:
+		    {
+            LuaUD->Data.Object.Object = Obj;
+		    }
+            break;
+	    case EUEDataType::Struct:
+		    {
+            LuaUD->Data.Struct.SetData(ScriptStruct, Value);
+		    }
+            break;
+	    default:
+            check(0);
+	    }
+    }
+}
+
+void ULuaState::PushUStructCopy(void* Value, UScriptStruct* DataType)
+{
+    PushLuaUEData(Value, DataType, EUEDataType::Struct, nullptr);
+}
+
+const char* const ULuaState::LuaUEDataMetatableName = MAKE_LUA_METATABLE_NAME(FLuaUEData);
 void ULuaState::BeginDestroy()
 {
 	UObject::BeginDestroy();
@@ -940,7 +1046,9 @@ void ULuaState::Init()
 
     lua_pop(InnerState, lua_gettop(InnerState));
 
-
+    luaL_newmetatable(InnerState, LuaUEDataMetatableName); // LuaUEDataMetatableName
+    //todo finalize LuaUEDataMetatableName
+    lua_pop(InnerState, 1);
     
 
 
