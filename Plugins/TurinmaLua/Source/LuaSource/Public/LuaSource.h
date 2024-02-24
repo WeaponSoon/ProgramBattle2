@@ -40,26 +40,54 @@ struct FTestStruct
 	int32 TestInt = 99;
 };
 
-struct FLuaUStructRefData
+
+struct FLuaArrayRefData
+{
+	UStruct* ElementType;
+	FScriptArray* Array;
+
+};
+
+struct FLuaArrayData
+{
+	UStruct* ElementType;
+	TAlignedBytes<sizeof(FScriptArray), alignof(FScriptArray)> InnerData;
+	bool bValid;
+
+	void AddReferencedObjects(UObject* Owner, FReferenceCollector& Collector, bool bStrong)
+	{
+		if(ElementType && bValid)
+		{
+			FScriptArray* Array = (FScriptArray*)&InnerData;
+			
+		}
+	}
+
+};
+
+struct FLuaUStructRefData //can also used to access native static array PROPERTY e.g. class USomeObject{UPROPERTY()FSomeStruct StrArray[100];}
 {
 	UScriptStruct* StructType;
 	void* PtrToData;
+	int32 MaxOffsetCount;
 
 	bool IsDataValid() const
 	{
-		return StructType != nullptr && PtrToData != nullptr;
+		return StructType != nullptr && PtrToData != nullptr && MaxOffsetCount > 0;
 	}
 
 	void Clear()
 	{
 		StructType = nullptr;
 		PtrToData = nullptr;
+		MaxOffsetCount = 0;
 	}
 
-	void SetRef(UScriptStruct* Tye, void* Data)
+	void SetRef(UScriptStruct* Tye, void* Data, int32 MaxCount)
 	{
 		StructType = Tye;
 		PtrToData = Data;
+		MaxOffsetCount = MaxCount;
 	}
 };
 
@@ -87,6 +115,24 @@ struct FLuaUStructData
 	void AddReferencedObjects(UObject* Owner, FReferenceCollector& Collector, bool bStrong);
 };
 
+struct FLuaUObjectRefData ////can also used to access native static array PROPERTY e.g. class USomeObject{UPROPERTY()UObject* ObjArray[100];}
+{
+	UObject** pObject;
+	int32 MaxOffsetCount;
+
+	void Clear()
+	{
+		pObject = nullptr;
+		MaxOffsetCount = 0;
+	}
+
+	bool IsDataValid() const
+	{
+		return pObject != nullptr && *pObject && MaxOffsetCount > 0;
+	}
+
+};
+
 struct FLuaUObjectData
 {
 	UObject* Object;
@@ -106,6 +152,7 @@ enum class EUEDataType
 	Struct,
 	StructRef,
 	Object,
+	ObjectRef
 };
 
 struct FLuaUEData : public FCustomMemoryItemThirdParty
@@ -114,6 +161,7 @@ struct FLuaUEData : public FCustomMemoryItemThirdParty
 	{
 		FLuaUStructRefData StructRef;
 		FLuaUStructData Struct;
+		FLuaUObjectRefData ObjectRef;
 		FLuaUObjectData Object;
 	} Data;
 	EUEDataType DataType = EUEDataType::None;
@@ -136,18 +184,31 @@ struct FLuaUEData : public FCustomMemoryItemThirdParty
 			return false;
 		}
 
+		if (DataType == EUEDataType::Struct)
+		{
+			return Data.Struct.IsDataValid();
+		}
+
+		if(DataType == EUEDataType::ObjectRef)
+		{
+			if (Oter.IsSet())
+			{
+				return Oter.GetValue() && Oter.GetValue()->IsDataValid() && Data.ObjectRef.IsDataValid();
+			}
+			return false;
+		}
+
 		if(DataType == EUEDataType::Object)
 		{
 			return Data.Object.IsDataValid();
 		}
 
-		if(DataType == EUEDataType::Struct)
-		{
-			return Data.Struct.IsDataValid();
-		}
+
 
 		return true;
 	}
+
+	bool Index(class ULuaState* L, const char* Key);
 
 	FLuaUEData()
 	{
@@ -166,6 +227,8 @@ struct FLuaUEData : public FCustomMemoryItemThirdParty
 			break;
 		case EUEDataType::Object:
 			Data.Object.Object = nullptr;
+		case EUEDataType::ObjectRef:
+			Data.ObjectRef.Clear();
 			break;
 		default:
 			break;
@@ -184,6 +247,8 @@ struct FLuaUEData : public FCustomMemoryItemThirdParty
 			Data.Struct.AddReferencedObjects(Owner, Collector, bStrong);
 			break;
 		case EUEDataType::StructRef:
+			break;
+		case EUEDataType::ObjectRef:
 			break;
 		case EUEDataType::None:
 			break;
@@ -205,6 +270,13 @@ class ATestWeakRefPtr : public AActor
 
 	UObject* ObjTest;
 	UObject* WeakObjTest;
+public:
+	UPROPERTY(BlueprintReadWrite)
+	TArray<UObject*> ObjArray;
+	UPROPERTY(BlueprintReadWrite)
+	TArray<FTestStruct> StructArray;
+	UPROPERTY()
+	UObject* OO[10];
 
 	UFUNCTION(CallInEditor)
 	void ConstructObjectTest()
@@ -270,7 +342,7 @@ class ULuaState : public UObject
 	void LockLua();
 	void UnlockLua();
 
-	LUASOURCE_API void PushLuaUEData(void* Value, UStruct* DataType, EUEDataType Type, TCustomMemoryHandle<FLuaUEData> Oter);
+	LUASOURCE_API void PushLuaUEData(void* Value, UStruct* DataType, EUEDataType Type, TCustomMemoryHandle<FLuaUEData> Oter, int32 MaxCount = 1);
 	LUASOURCE_API void PushUStructCopy(void* Value, UScriptStruct* DataType);
 public:
 

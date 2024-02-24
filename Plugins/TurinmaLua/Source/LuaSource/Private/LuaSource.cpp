@@ -841,6 +841,42 @@ void FLuaUObjectData::AddReferencedObjects(UObject* Owner, FReferenceCollector& 
     }
 }
 
+bool FLuaUEData::Index(ULuaState* L, const char* Key)
+{
+    //switch(DataType)
+    //{
+    //case EUEDataType::Struct:
+	   // {
+		  //  if(Data.Struct.IsDataValid())
+		  //  {
+    //            FProperty* Prop = Data.Struct.StructType->FindPropertyByName(UTF8_TO_TCHAR(Key));
+    //            if(Prop)
+    //            {
+    //                //Prop->ContainerPtrToValuePtr<>()
+    //            }
+		  //  }
+	   // }
+    //    break;
+    //case EUEDataType::StructRef:
+	   // {
+		  //  if(Data.StructRef.IsDataValid())
+		  //  {
+			 //   
+		  //  }
+	   // }
+    //    break;
+    //case EUEDataType::Object:
+	   // {
+		  //  if(Data.Object.IsDataValid())
+		  //  {
+			 //   
+		  //  }
+	   // }
+    //    break;
+    //}
+    return false;
+}
+
 void ULuaState::PostGarbageCollect()
 {
     if(InnerState)
@@ -906,7 +942,7 @@ void ULuaState::UnlockLua()
     }
 }
 
-void ULuaState::PushLuaUEData(void* Value, UStruct* DataType, EUEDataType Type, TCustomMemoryHandle<FLuaUEData> Oter)
+void ULuaState::PushLuaUEData(void* Value, UStruct* DataType, EUEDataType Type, TCustomMemoryHandle<FLuaUEData> Oter, int32 MaxCount)
 {
     if(!InnerState)
     {
@@ -921,6 +957,7 @@ void ULuaState::PushLuaUEData(void* Value, UStruct* DataType, EUEDataType Type, 
         UScriptStruct* ScriptStruct = nullptr;
         UClass* Class = nullptr;
         UObject* Obj = nullptr;
+        UObject** pObj = nullptr;
         switch (Type)
         {
         case EUEDataType::Struct:
@@ -934,9 +971,19 @@ void ULuaState::PushLuaUEData(void* Value, UStruct* DataType, EUEDataType Type, 
         }
         break;
         case EUEDataType::Object:
+        case EUEDataType::ObjectRef:
         {
             Class = Cast<UClass>(DataType);
-            Obj = (UObject*)Value;
+			if(Type == EUEDataType::Object)
+			{
+                Obj = (UObject*)Value;
+			}
+            else
+            {
+                pObj = (UObject**)Value;
+                Obj = *pObj;
+            }
+            
             if (!Class)
             {
                 return;
@@ -974,12 +1021,18 @@ void ULuaState::PushLuaUEData(void* Value, UStruct* DataType, EUEDataType Type, 
 	    {
 	    case EUEDataType::StructRef:
 		    {
-            LuaUD->Data.StructRef.SetRef(ScriptStruct, Value);
+            LuaUD->Data.StructRef.SetRef(ScriptStruct, Value, MaxCount);
 		    }
             break;
 	    case EUEDataType::Object:
 		    {
             LuaUD->Data.Object.Object = Obj;
+		    }
+            break;
+	    case EUEDataType::ObjectRef:
+		    {
+            LuaUD->Data.ObjectRef.pObject = pObj;
+            LuaUD->Data.ObjectRef.MaxOffsetCount = MaxCount;
 		    }
             break;
 	    case EUEDataType::Struct:
