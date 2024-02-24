@@ -841,6 +841,15 @@ void FLuaUObjectData::AddReferencedObjects(UObject* Owner, FReferenceCollector& 
     }
 }
 
+void ULuaState::PostGarbageCollect()
+{
+    if(InnerState)
+    {
+        lua_gc(InnerState, LUA_GCCOLLECT);
+        lua_gc(InnerState, LUA_GCSTOP);
+    }
+}
+
 void ULuaState::OnCollectLuaRefs(FReferenceCollector& Collector, GCObject* o, bool w, lua_State* l)
 {
     if(o->tt == LUA_VUSERDATA)
@@ -849,7 +858,7 @@ void ULuaState::OnCollectLuaRefs(FReferenceCollector& Collector, GCObject* o, bo
         if (u->nuvalue != 0 && u->metatable)
         {  
             auto metatableName = GetMetatableName(l, u->metatable);
-            if(metatableName && strcmp(metatableName, LuaUEDataMetatableName))
+            if(metatableName && strcmp(metatableName, LuaUEDataMetatableName) == 0)
             {
                 void* UD = getudatamem(u);
                 FLuaUEData* UEData = (FLuaUEData*)UD;
@@ -899,6 +908,10 @@ void ULuaState::UnlockLua()
 
 void ULuaState::PushLuaUEData(void* Value, UStruct* DataType, EUEDataType Type, TCustomMemoryHandle<FLuaUEData> Oter)
 {
+    if(!InnerState)
+    {
+        return;
+    }
     if(Type == EUEDataType::None)
     {
         return;
@@ -945,6 +958,7 @@ void ULuaState::PushLuaUEData(void* Value, UStruct* DataType, EUEDataType Type, 
         }
 
         FLuaUEData* LuaUD = (FLuaUEData*)lua_newuserdata(InnerState, sizeof(FLuaUEData));//ud
+        new (LuaUD) FLuaUEData();
         if(!LuaUD)
         {
             return;
@@ -1016,6 +1030,18 @@ int TurinmaTableNewIndex(lua_State* L)
 }
 
 
+int OnDestroyUEDataInLua(lua_State* L)
+{
+    lua_getmetatable(L, 1);//obj, metatable
+    lua_getfield(L, -1, "__name");//obj, metatable, LuaUEDataMetatableName
+    if(ensure(strcmp(lua_tostring(L, -1), ULuaState::LuaUEDataMetatableName) == 0))
+    {
+        FLuaUEData* LuaUEData = (FLuaUEData*)lua_touserdata(L, 1);
+        LuaUEData->~FLuaUEData();
+    }
+    return 0;
+}
+
 void ULuaState::Init()
 {
     LuaAt.clear();
@@ -1047,10 +1073,15 @@ void ULuaState::Init()
     lua_pop(InnerState, lua_gettop(InnerState));
 
     luaL_newmetatable(InnerState, LuaUEDataMetatableName); // LuaUEDataMetatableName
+
+    lua_pushstring(InnerState, "__gc");
+    lua_pushcfunction(InnerState, OnDestroyUEDataInLua);
+    lua_rawset(InnerState, -3);
+
     //todo finalize LuaUEDataMetatableName
     lua_pop(InnerState, 1);
     
-
+    FCoreUObjectDelegates::GetPostGarbageCollect().AddUObject(this, &ULuaState::PostGarbageCollect);
 
 
     LuaCPPAPI::luaC_foreachgcobj(InnerState, OnTravelLuaGCObject);
@@ -1060,8 +1091,22 @@ void ULuaState::Finalize()
 {
     if(InnerState)
     {
+        FCoreUObjectDelegates::GetPostGarbageCollect().RemoveAll(this);
         lua_close(InnerState);
         InnerState = nullptr;
+    }
+}
+
+void ULuaState::Pop(int32 Num)
+{
+    if (InnerState)
+    {
+        int32 MaxPop = lua_gettop(InnerState);
+        int32 P = FMath::Min(Num, MaxPop);
+        if(P > 0)
+        {
+            lua_pop(InnerState, P);
+        }
     }
 }
 

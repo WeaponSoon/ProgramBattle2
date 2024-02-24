@@ -170,6 +170,7 @@ struct FLuaUEData : public FCustomMemoryItemThirdParty
 		default:
 			break;
 		}
+		DataType = EUEDataType::None;
 	}
 
 	void AddReferencedObjects(UObject* Owner, FReferenceCollector& Collector, bool bStrong)
@@ -253,6 +254,7 @@ class ULuaState : public UObject
 {
 	GENERATED_BODY()
 
+	void PostGarbageCollect();
 
 	friend void LuaLock(lua_State*);
 	friend void LuaUnLock(lua_State*);
@@ -281,6 +283,9 @@ public:
 
 	UFUNCTION(BlueprintCallable)
 	LUASOURCE_API void Finalize();
+
+	UFUNCTION(BlueprintCallable)
+	LUASOURCE_API void Pop(int32 Num);
 
 	UFUNCTION(BlueprintCallable)
 	void PushUObject(UObject* Obj)
