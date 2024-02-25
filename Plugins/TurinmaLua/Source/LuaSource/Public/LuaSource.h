@@ -41,6 +41,138 @@ struct FTestStruct
 };
 
 
+enum class ETypeKind : uint16
+{
+	None,
+	PreDefinedKindBegin,
+	NumericBegin = PreDefinedKindBegin,
+	Int8 = NumericBegin,
+	Int16,
+	Int32,
+	Int64,
+	Byte,//uint8
+	UInt16,
+	UInt32,
+	UInt64,
+	Float,
+	Double,
+	NumericEnd = Double,
+	Bool,
+	BitBool,
+	String,
+	Name,
+	Text,
+	Vector,
+	Rotator,
+	Quat,
+	Transform,
+	Matrix,
+	RotationMatrix,
+	Color,
+	LinearColor,
+	PreDefinedKindEnd,
+
+	CombineKindBegin = PreDefinedKindEnd,
+	Array = CombineKindBegin,
+	Map,
+	Set,
+	CombineKindEnd,
+
+
+	UserDefinedKindBegin = CombineKindEnd,
+	U_Enum = UserDefinedKindBegin,
+	U_ScriptStruct,
+	U_Class,
+	U_Function,
+	UserDefinedKindEnd
+	
+};
+
+struct FTypeDescRefCount
+{
+	struct FTypeDesc* TypeDesc = nullptr;
+	int32 RefCount = 0;
+};
+
+UCLASS()
+class UUETypeDescContainer : public UObject
+{
+	GENERATED_BODY()
+
+public:
+	FCriticalSection CS;
+
+	TMap<UObject*, FTypeDescRefCount> Map;
+
+	LUASOURCE_API static void AddReferencedObjects(UObject* InThis, FReferenceCollector& Collector);
+};
+
+UCLASS()
+class UUECombineKindContainer : public UObject
+{
+	GENERATED_BODY()
+
+public:
+	FCriticalSection CS;
+	TMap<TArray<struct FTypeDesc*>, FTypeDescRefCount> Map[(uint16)ETypeKind::CombineKindEnd - (uint16)ETypeKind::CombineKindBegin];
+	/* TODO AddReferencedObject ? ? ? really need ? ?
+	 * if there is a CombineKind TypeDesc references some other TypeDesc, the referenced TypeDescs should not be destroyed, so for example
+	 * a UE TypeDesc will reference its UFiled object by UUETypeDescContainer, and the UFiled object should not be referenced by UUECombineKindContainer again. We need to consider
+	 * hot to make sure that TypeDescs referenced by CombineKind TypeDesc won't be destroyed until the referencing CombineKind TypeDesc been destroyed rather than deal with the
+	 * referenced TypeDesc's GC logic in UUECombineKindContainer
+	*/
+};
+
+
+struct FTypeDesc
+{
+	int32 NumOfComponentsOfCombineType;
+	FTypeDesc* ComponentsOfCombineType;
+
+	union
+	{
+		UObject* Pointer;
+		UField* BasePointer;
+
+		UEnum* U_Enum;
+		UFunction* U_Function;
+		UClass* U_Class;
+		UScriptStruct* U_ScriptStruct;
+	} UserDefinedTypePointer;
+
+	ETypeKind Kind;
+
+	void InitialReset()
+	{
+		static_assert(std::is_standard_layout_v<FTypeDesc> && std::is_trivial_v<FTypeDesc>, "FTypeDesc must be POD");
+		FMemory::Memzero(this, sizeof(FTypeDesc));
+	}
+
+	LUASOURCE_API int32 GetSize() const;
+	LUASOURCE_API static int32 GetSizePreDefinedKind(ETypeKind InKind);
+	LUASOURCE_API static FTypeDesc* AquireClassDescByUEType(UField* UEType);
+	LUASOURCE_API static FTypeDesc* AquireClassDescByPreDefinedKind(ETypeKind InKind);
+	LUASOURCE_API static FTypeDesc* AquireClassDescByCombineKind(ETypeKind InKind, const TArray<FTypeDesc*>& InKey);
+};
+
+
+struct FLuaUEValue
+{
+	static constexpr int32 MaxInlineSize = sizeof(FTransform) > sizeof(void*) ? sizeof(FTransform) : sizeof(void*);
+
+	FTypeDesc* TypeDesc;
+	TAlignedBytes<MaxInlineSize, alignof(std::max_align_t)> InnerData;
+	
+	FLuaUEValue() : TypeDesc(nullptr), InnerData()
+	{
+		FMemory::Memzero(&InnerData, sizeof(InnerData));
+	}
+
+
+
+};
+
+
 struct FLuaArrayRefData
 {
 	UStruct* ElementType;

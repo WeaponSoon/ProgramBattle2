@@ -751,6 +751,142 @@ void OnTravelLuaGCObject(GCObject* o, bool strong, lua_State* L)
     }
 }
 
+void UUETypeDescContainer::AddReferencedObjects(UObject* InThis, FReferenceCollector& Collector)
+{
+    auto* This = CastChecked<UUETypeDescContainer>(InThis);
+    FScopeLock Lock(&This->CS);
+    for (auto&& Item : Map)
+    {
+        Collector.MarkWeakObjectReferenceForClearing(&Item.Value.TypeDesc->UserDefinedTypePointer.Pointer);
+    }
+}
+
+int32 FTypeDesc::GetSize() const
+{
+    switch(Kind)
+    {
+    case ETypeKind::U_ScriptStruct: return UserDefinedTypePointer.U_ScriptStruct ? UserDefinedTypePointer.U_ScriptStruct->GetStructureSize() : 0;
+    default: return GetSizePreDefinedKind(Kind);
+    }
+}
+
+int32 FTypeDesc::GetSizePreDefinedKind(ETypeKind InKind)
+{
+    switch (InKind)
+    {
+    case ETypeKind::None: return 0;
+
+
+    case ETypeKind::Int8: return sizeof(int8);
+    case ETypeKind::Int16: return sizeof(int16);
+    case ETypeKind::Int32: return sizeof(int32);
+    case ETypeKind::Int64: return sizeof(int64);
+    case ETypeKind::Byte: return sizeof(uint8);
+    case ETypeKind::UInt16: return sizeof(uint16);
+    case ETypeKind::UInt32: return sizeof(uint32);
+    case ETypeKind::UInt64: return sizeof(uint64);
+    case ETypeKind::Float: return sizeof(float);
+    case ETypeKind::Double: return sizeof(double);
+
+    case ETypeKind::Bool: return sizeof(bool);
+    case ETypeKind::BitBool: return 0;
+    case ETypeKind::String: return sizeof(FString);
+    case ETypeKind::Name: return sizeof(FName);
+    case ETypeKind::Text: return sizeof(FText);
+    case ETypeKind::Vector: return sizeof(FVector);
+    case ETypeKind::Rotator: return sizeof(FRotator);
+    case ETypeKind::Quat: return sizeof(FQuat);
+    case ETypeKind::Transform: return sizeof(FTransform);
+    case ETypeKind::Matrix: return sizeof(FMatrix);
+    case ETypeKind::RotationMatrix: return sizeof(FRotationMatrix);
+    case ETypeKind::Color: return sizeof(FColor);
+    case ETypeKind::LinearColor: return sizeof(FLinearColor);
+
+
+    case ETypeKind::Array: return sizeof(FScriptArray);
+    case ETypeKind::Map: return sizeof(FScriptMap);
+    case ETypeKind::Set: return sizeof(FScriptSet);
+
+    case ETypeKind::U_Enum: return sizeof(uint8);
+    case ETypeKind::U_ScriptStruct: return 0;
+    case ETypeKind::U_Class: return sizeof(UObject*);
+    case ETypeKind::U_Function: return sizeof(UObject*);
+
+    default: return 0;
+    }
+}
+
+FTypeDesc* FTypeDesc::AquireClassDescByUEType(UField* UEType)
+{
+    static UUETypeDescContainer* Container = NewObject<UUETypeDescContainer>();
+    Container->AddToRoot();
+    FScopeLock Lock(&Container->CS);
+    if(UEType)
+    {
+        ETypeKind Kind = ETypeKind::None;
+        if(UClass* Class = Cast<UClass>(UEType))
+        {
+            Kind = ETypeKind::U_Class;
+        }
+        if(UScriptStruct* ScriptStruct = Cast<UScriptStruct>(UEType))
+        {
+            Kind = ETypeKind::U_ScriptStruct;
+        }
+        if(UEnum* Enum = Cast<UEnum>(UEType))
+        {
+            Kind = ETypeKind::U_Enum;
+        }
+        if(UFunction* Function = Cast<UFunction>(UEType))
+        {
+            Kind = ETypeKind::U_Function;
+        }
+        if(Kind != ETypeKind::None)
+        {
+            auto&& Item = Container->Map.FindOrAdd(UEType);
+            if (!Item.TypeDesc)
+            {
+                Item.TypeDesc = new FTypeDesc();
+            }
+            check(Item.TypeDesc->Kind == ETypeKind::None ||
+                (Item.TypeDesc->Kind >= ETypeKind::UserDefinedKindBegin && Item.TypeDesc->Kind < ETypeKind::UserDefinedKindEnd));
+            Item.TypeDesc->Kind = Kind;
+            if(!Item.TypeDesc->UserDefinedTypePointer.Pointer)
+            {
+                Item.TypeDesc->UserDefinedTypePointer.Pointer = UEType;
+            }
+            else
+            {
+                check(Item.TypeDesc->UserDefinedTypePointer.Pointer == UEType);
+            }
+            return Item.TypeDesc;
+        }
+    }
+    return nullptr;
+}
+
+FTypeDesc* FTypeDesc::AquireClassDescByPreDefinedKind(ETypeKind InKind)
+{
+    static FCriticalSection CS;
+    FScopeLock Lock(&CS);
+    if(InKind >= ETypeKind::PreDefinedKindBegin && InKind < ETypeKind::PreDefinedKindEnd)
+    {
+        static TMap<ETypeKind, FTypeDescRefCount> Map;
+        auto&& Item = Map.FindOrAdd(InKind);
+        if(Item.TypeDesc->Kind == ETypeKind::None)
+        {
+            Item.TypeDesc->Kind = InKind;
+        }
+        check(Item.TypeDesc->Kind == InKind);
+        return Item.TypeDesc;
+    }
+    return nullptr;
+}
+
+FTypeDesc* FTypeDesc::AquireClassDescByCombineKind(ETypeKind InKind, const TArray<FTypeDesc*>& InKey)
+{
+
+}
+
 void FLuaUStructData::Clear()
 {
     if (StructType && bValid)
