@@ -88,11 +88,50 @@ enum class ETypeKind : uint16
 	
 };
 
-struct FTypeDescRefCount
+
+
+struct FTypeDesc : FRefCountBase
 {
-	struct FTypeDesc* TypeDesc = nullptr;
-	int32 RefCount = 0;
+	TArray<TRefCountPtr<FTypeDesc>> CombineKindSubTypes;
+
+	union
+	{
+		UObject* Pointer;
+		UField* BasePointer;
+
+		UEnum* U_Enum;
+		UFunction* U_Function;
+		UClass* U_Class;
+		UScriptStruct* U_ScriptStruct;
+	} UserDefinedTypePointer;
+
+	ETypeKind Kind = ETypeKind::None;
+
+	FTypeDesc()
+	{
+		//static_assert(std::is_standard_layout_v<FTypeDesc> && std::is_trivial_v<FTypeDesc>, "FTypeDesc must be POD");
+		FMemory::Memzero(&UserDefinedTypePointer, sizeof(UserDefinedTypePointer));
+	}
+
+	LUASOURCE_API void AddReferencedObject(UObject* Oter, void* PtrToValue, FReferenceCollector& Collector, bool bStrong);
+
+	LUASOURCE_API int32 GetSize() const;
+	LUASOURCE_API int32 GetAlign() const;
+	LUASOURCE_API void InitValue(void* ValueAddress) const;
+	LUASOURCE_API void CopyValue(void* Dest, void* Source) const;
+	LUASOURCE_API void DestroyValue(void* ValueAddress) const;
+
+	LUASOURCE_API uint32 GetTypeHash(void* ValueAddress) const;
+	LUASOURCE_API bool ValueEqual(void* Dest, void* Source) const;
+
+
+	LUASOURCE_API static int32 GetSizePreDefinedKind(ETypeKind InKind);
+	LUASOURCE_API static TRefCountPtr<FTypeDesc> AquireClassDescByUEType(UField* UEType);
+	LUASOURCE_API static TRefCountPtr<FTypeDesc> AquireClassDescByPreDefinedKind(ETypeKind InKind);
+	LUASOURCE_API static TRefCountPtr<FTypeDesc> AquireClassDescByCombineKind(ETypeKind InKind, const TArray<TRefCountPtr<FTypeDesc>>& InKey);
 };
+
+typedef TRefCountPtr<FTypeDesc> FTypeDescRefCount;
 
 UCLASS()
 class UUETypeDescContainer : public UObject
@@ -107,60 +146,32 @@ public:
 	LUASOURCE_API static void AddReferencedObjects(UObject* InThis, FReferenceCollector& Collector);
 };
 
-UCLASS()
-class UUECombineKindContainer : public UObject
-{
-	GENERATED_BODY()
-
-public:
-	FCriticalSection CS;
-	TMap<TArray<struct FTypeDesc*>, FTypeDescRefCount> Map[(uint16)ETypeKind::CombineKindEnd - (uint16)ETypeKind::CombineKindBegin];
-	/* TODO AddReferencedObject ? ? ? really need ? ?
-	 * if there is a CombineKind TypeDesc references some other TypeDesc, the referenced TypeDescs should not be destroyed, so for example
-	 * a UE TypeDesc will reference its UFiled object by UUETypeDescContainer, and the UFiled object should not be referenced by UUECombineKindContainer again. We need to consider
-	 * hot to make sure that TypeDescs referenced by CombineKind TypeDesc won't be destroyed until the referencing CombineKind TypeDesc been destroyed rather than deal with the
-	 * referenced TypeDesc's GC logic in UUECombineKindContainer
-	*/
-};
-
-
-struct FTypeDesc
-{
-	int32 NumOfComponentsOfCombineType;
-	FTypeDesc* ComponentsOfCombineType;
-
-	union
-	{
-		UObject* Pointer;
-		UField* BasePointer;
-
-		UEnum* U_Enum;
-		UFunction* U_Function;
-		UClass* U_Class;
-		UScriptStruct* U_ScriptStruct;
-	} UserDefinedTypePointer;
-
-	ETypeKind Kind;
-
-	void InitialReset()
-	{
-		static_assert(std::is_standard_layout_v<FTypeDesc> && std::is_trivial_v<FTypeDesc>, "FTypeDesc must be POD");
-		FMemory::Memzero(this, sizeof(FTypeDesc));
-	}
-
-	LUASOURCE_API int32 GetSize() const;
-	LUASOURCE_API static int32 GetSizePreDefinedKind(ETypeKind InKind);
-	LUASOURCE_API static FTypeDesc* AquireClassDescByUEType(UField* UEType);
-	LUASOURCE_API static FTypeDesc* AquireClassDescByPreDefinedKind(ETypeKind InKind);
-	LUASOURCE_API static FTypeDesc* AquireClassDescByCombineKind(ETypeKind InKind, const TArray<FTypeDesc*>& InKey);
-};
-
-
 struct FLuaUEValue
 {
-	static constexpr int32 MaxInlineSize = sizeof(FTransform) > sizeof(void*) ? sizeof(FTransform) : sizeof(void*);
+	//static constexpr int32 GetMaxInlineSize()
+	//{
+	//	int32 MaxInlineSize = 0;
+	//	#define FIND_MAX_TYPE_GetMaxInlineSize(Type) \
+	//	if(sizeof(Type) > MaxInlineSize)\
+	//	{\
+	//		MaxInlineSize = sizeof(Type);\
+	//	}\
 
-	FTypeDesc* TypeDesc;
+	//	FIND_MAX_TYPE_GetMaxInlineSize(FScriptArray);
+	//	FIND_MAX_TYPE_GetMaxInlineSize(FScriptMap);
+	//	FIND_MAX_TYPE_GetMaxInlineSize(FScriptSet);
+	//	FIND_MAX_TYPE_GetMaxInlineSize(FMatrix);
+	//	FIND_MAX_TYPE_GetMaxInlineSize(FRotationMatrix);
+	//	FIND_MAX_TYPE_GetMaxInlineSize(FTransform);
+	//	FIND_MAX_TYPE_GetMaxInlineSize(void*);
+
+	//	return MaxInlineSize;
+	//}
+
+	static constexpr int32 MaxInlineSize = 256;
+
+	FTypeDescRefCount TypeDesc;
+	bool bHasData = false;
 	TAlignedBytes<MaxInlineSize, alignof(std::max_align_t)> InnerData;
 	
 	FLuaUEValue() : TypeDesc(nullptr), InnerData()
@@ -168,9 +179,47 @@ struct FLuaUEValue
 		FMemory::Memzero(&InnerData, sizeof(InnerData));
 	}
 
+	void* GetData()
+	{
+		if(bHasData && TypeDesc.IsValid() && TypeDesc->GetSize() > 0)
+		{
+			if(TypeDesc->GetSize() > MaxInlineSize)
+			{
+				return *(void**)(&InnerData);
+			}
+			else
+			{
+				return &InnerData;
+			}
+		}
+		return nullptr;
+	}
 
+	void InitData()
+	{
+		if(!bHasData && TypeDesc.IsValid() && TypeDesc->GetSize() > 0)
+		{
+			if (TypeDesc->GetSize() > MaxInlineSize)
+			{
+				void* ObjectMem = FMemory::Malloc(TypeDesc->GetSize());
+				TypeDesc->InitValue(ObjectMem);
+				*(void**)(&InnerData) = ObjectMem;
+				bHasData = true;
+			}
+			else
+			{
+				TypeDesc->InitValue(&InnerData);
+				bHasData = true;
+			}
+		}
+	}
 
+	void AddReferencedObject(UObject* Owner, FReferenceCollector& Collector, bool bStrong);
+	
 };
+
+
+
 
 
 struct FLuaArrayRefData

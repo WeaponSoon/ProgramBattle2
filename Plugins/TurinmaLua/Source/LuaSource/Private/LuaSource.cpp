@@ -751,13 +751,137 @@ void OnTravelLuaGCObject(GCObject* o, bool strong, lua_State* L)
     }
 }
 
+
 void UUETypeDescContainer::AddReferencedObjects(UObject* InThis, FReferenceCollector& Collector)
 {
     auto* This = CastChecked<UUETypeDescContainer>(InThis);
     FScopeLock Lock(&This->CS);
-    for (auto&& Item : Map)
+    for(auto&& It = This->Map.CreateIterator(); It; ++It)
     {
-        Collector.MarkWeakObjectReferenceForClearing(&Item.Value.TypeDesc->UserDefinedTypePointer.Pointer);
+	    if(It->Value.GetRefCount() == 1)
+	    {
+            Collector.MarkWeakObjectReferenceForClearing(&It->Value->UserDefinedTypePointer.Pointer);
+	    }
+        else
+        {
+            Collector.AddReferencedObject(It->Value->UserDefinedTypePointer.Pointer);
+        }
+    }
+}
+
+void FLuaUEValue::AddReferencedObject(UObject* Owner, FReferenceCollector& Collector, bool bStrong)
+{
+	if(TypeDesc.IsValid())
+	{
+        TypeDesc->AddReferencedObject(Owner, GetData(), Collector, bStrong);
+	}
+}
+
+void FTypeDesc::AddReferencedObject(UObject* Oter, void* PtrToValue, FReferenceCollector& Collector, bool bStrong)
+{
+    switch (Kind)
+    {
+    case ETypeKind::None: return;
+
+
+    case ETypeKind::Int8:;
+    case ETypeKind::Int16:;
+    case ETypeKind::Int32:
+    case ETypeKind::Int64:
+    case ETypeKind::Byte:
+    case ETypeKind::UInt16:
+    case ETypeKind::UInt32:
+    case ETypeKind::UInt64:
+    case ETypeKind::Float:
+    case ETypeKind::Double:
+
+    case ETypeKind::Bool:
+    case ETypeKind::BitBool:
+        return;
+    case ETypeKind::String: return;
+    case ETypeKind::Name: return;
+    case ETypeKind::Text: return;
+    case ETypeKind::Vector: return;
+    case ETypeKind::Rotator: return;
+    case ETypeKind::Quat:return;
+    case ETypeKind::Transform: return;
+    case ETypeKind::Matrix: return;
+    case ETypeKind::RotationMatrix: return;
+    case ETypeKind::Color: return;
+    case ETypeKind::LinearColor: return;
+
+
+    case ETypeKind::Array:
+	    {
+			FScriptArray* ArrayPtr = (FScriptArray*)PtrToValue;
+            if(CombineKindSubTypes.Num() == 1 && CombineKindSubTypes[0].IsValid())
+            {
+	            for(int Ai = 0; Ai < ArrayPtr->Num(); ++Ai)
+	            {
+                    CombineKindSubTypes[0]->AddReferencedObject(Oter, (uint8*)ArrayPtr->GetData() + CombineKindSubTypes[0]->GetSize() * Ai, Collector, bStrong);
+	            }
+            }
+	    }
+        return;
+    case ETypeKind::Map:
+	    {
+        FScriptMap* MapPtr = (FScriptMap*)PtrToValue;
+        if (CombineKindSubTypes.Num() == 2 && CombineKindSubTypes[0].IsValid() && CombineKindSubTypes[1].IsValid())
+        {
+            auto Layout = FScriptMap::GetScriptLayout(CombineKindSubTypes[0]->GetSize(), CombineKindSubTypes[0]->GetAlign(),
+                CombineKindSubTypes[1]->GetSize(), CombineKindSubTypes[1]->GetAlign());
+            for (int Ai = 0; Ai < MapPtr->Num(); ++Ai)
+            {
+                auto PairPtr = MapPtr->GetData(Ai, Layout);
+
+                CombineKindSubTypes[0]->AddReferencedObject(Oter, (uint8*)PairPtr, Collector, bStrong);
+                CombineKindSubTypes[1]->AddReferencedObject(Oter, (uint8*)PairPtr + Layout.ValueOffset, Collector, bStrong);
+            }
+        }
+	    }
+        return;
+    case ETypeKind::Set:
+	    {
+    	FScriptSet* SetPtr = (FScriptSet*)PtrToValue;
+        if (CombineKindSubTypes.Num() == 1 && CombineKindSubTypes[0].IsValid())
+        {
+            auto Layout = FScriptSet::GetScriptLayout(CombineKindSubTypes[0]->GetSize(), CombineKindSubTypes[0]->GetAlign());
+            for (int Ai = 0; Ai < SetPtr->Num(); ++Ai)
+            {
+                auto PairPtr = SetPtr->GetData(Ai, Layout);
+
+                CombineKindSubTypes[0]->AddReferencedObject(Oter, (uint8*)PairPtr, Collector, bStrong);
+            }
+        }
+	    }
+        return;
+
+    case ETypeKind::U_Enum: return;
+    case ETypeKind::U_ScriptStruct:
+        if (UserDefinedTypePointer.U_ScriptStruct)
+        {
+            Collector.AddPropertyReferences(UserDefinedTypePointer.U_ScriptStruct, PtrToValue);
+        }
+    	return;
+    case ETypeKind::U_Class:
+	    {
+		    if(bStrong)
+		    {
+                Collector.AddReferencedObject(*(UObject**)PtrToValue, Oter);
+		    }
+            else
+            {
+                Collector.MarkWeakObjectReferenceForClearing((UObject**)PtrToValue);
+            }
+	    }
+        return;
+    case ETypeKind::U_Function:
+	    {
+		    
+	    }
+        return;
+
+    default: return;
     }
 }
 
@@ -767,6 +891,494 @@ int32 FTypeDesc::GetSize() const
     {
     case ETypeKind::U_ScriptStruct: return UserDefinedTypePointer.U_ScriptStruct ? UserDefinedTypePointer.U_ScriptStruct->GetStructureSize() : 0;
     default: return GetSizePreDefinedKind(Kind);
+    }
+}
+
+int32 FTypeDesc::GetAlign() const
+{
+    switch (Kind)
+    {
+    case ETypeKind::None: return 0;
+
+
+    case ETypeKind::Int8: return alignof(int8);
+    case ETypeKind::Int16: return alignof(int16);
+    case ETypeKind::Int32: return alignof(int32);
+    case ETypeKind::Int64: return alignof(int64);
+    case ETypeKind::Byte: return alignof(uint8);
+    case ETypeKind::UInt16: return alignof(uint16);
+    case ETypeKind::UInt32: return alignof(uint32);
+    case ETypeKind::UInt64: return alignof(uint64);
+    case ETypeKind::Float: return alignof(float);
+    case ETypeKind::Double: return alignof(double);
+
+    case ETypeKind::Bool: return alignof(bool);
+    case ETypeKind::BitBool: return 0;
+    case ETypeKind::String: return alignof(FString);
+    case ETypeKind::Name: return alignof(FName);
+    case ETypeKind::Text: return alignof(FText);
+    case ETypeKind::Vector: return alignof(FVector);
+    case ETypeKind::Rotator: return alignof(FRotator);
+    case ETypeKind::Quat: return alignof(FQuat);
+    case ETypeKind::Transform: return alignof(FTransform);
+    case ETypeKind::Matrix: return alignof(FMatrix);
+    case ETypeKind::RotationMatrix: return alignof(FRotationMatrix);
+    case ETypeKind::Color: return alignof(FColor);
+    case ETypeKind::LinearColor: return alignof(FLinearColor);
+
+
+    case ETypeKind::Array: return alignof(FScriptArray);
+    case ETypeKind::Map: return alignof(FScriptMap);
+    case ETypeKind::Set: return alignof(FScriptSet);
+
+    case ETypeKind::U_Enum: return alignof(uint8);
+    case ETypeKind::U_ScriptStruct: return UserDefinedTypePointer.U_ScriptStruct ? UserDefinedTypePointer.U_ScriptStruct->GetMinAlignment() : 0;
+    case ETypeKind::U_Class: return alignof(UObject*);
+    case ETypeKind::U_Function: return alignof(UObject*);
+
+    default: return alignof(max_align_t);
+    }
+}
+
+void FTypeDesc::InitValue(void* ValueAddress) const
+{
+    switch (Kind)
+    {
+    case ETypeKind::None: return;
+
+
+    case ETypeKind::Int8: new (ValueAddress) int8(0); return;
+    case ETypeKind::Int16: new (ValueAddress) int16(0); return;
+    case ETypeKind::Int32: new (ValueAddress) int32(0); return;
+    case ETypeKind::Int64: new (ValueAddress) int64(0); return;
+    case ETypeKind::Byte: new (ValueAddress) uint8(0); return;
+    case ETypeKind::UInt16: new (ValueAddress) uint16(0); return;
+    case ETypeKind::UInt32: new (ValueAddress) uint32(0); return;
+    case ETypeKind::UInt64: new (ValueAddress) uint64(0); return;
+    case ETypeKind::Float: new (ValueAddress) float(0); return;
+    case ETypeKind::Double: new (ValueAddress) double(0); return;
+
+    case ETypeKind::Bool: new (ValueAddress) bool(false); return;
+    case ETypeKind::BitBool: return;
+    case ETypeKind::String: new(ValueAddress) FString(); return;
+    case ETypeKind::Name: new (ValueAddress) FName(); return;
+    case ETypeKind::Text: new (ValueAddress) FText(); return;
+    case ETypeKind::Vector: new (ValueAddress) FVector(); return;
+    case ETypeKind::Rotator: new (ValueAddress) FRotator(); return;
+    case ETypeKind::Quat: new (ValueAddress) FQuat(); return;
+    case ETypeKind::Transform: new (ValueAddress) FTransform(); return;
+    case ETypeKind::Matrix: new (ValueAddress) FMatrix(); return;
+    case ETypeKind::RotationMatrix: new (ValueAddress) FRotationMatrix(FRotator()); return;
+    case ETypeKind::Color: new (ValueAddress) FColor(0); return;
+    case ETypeKind::LinearColor:new (ValueAddress) FLinearColor(); return;
+
+
+    case ETypeKind::Array: new (ValueAddress) FScriptArray(); return;
+    case ETypeKind::Map: new (ValueAddress) FScriptMap(); return;
+    case ETypeKind::Set: new (ValueAddress) FScriptSet(); return;
+
+    case ETypeKind::U_Enum: new (ValueAddress) int8(0); return;
+    case ETypeKind::U_ScriptStruct: 
+        if (UserDefinedTypePointer.U_ScriptStruct) { UserDefinedTypePointer.U_ScriptStruct->InitializeDefaultValue((uint8*)ValueAddress); } return;
+    case ETypeKind::U_Class: new (ValueAddress) UObject* (nullptr); return;
+    case ETypeKind::U_Function: return;
+
+    default: return;
+    }
+}
+
+template<typename T>
+uint32 RawGetValueHash(void* Address)
+{
+    return GetTypeHash(*(T*)Address);
+}
+
+template<typename T>
+bool RawCompairValue(void* Dest, void* Source)
+{
+    return *(T*)Dest == *(T*)Source;
+}
+template<>
+bool RawCompairValue<FTransform>(void* Dest, void* Source)
+{
+    return ((FTransform*)Dest)->Identical((FTransform*)Source, 0);
+}
+//todo not finish yet
+bool RawCompairArray(void* Dest, void* Source, TRefCountPtr<FTypeDesc> ElementType)
+{
+    return false;
+}
+//todo not finish yet
+bool RawCompairSet(void* Dest, void* Source, TRefCountPtr<FTypeDesc> ElementType)
+{
+    return false;
+}
+//todo not finish yet
+bool RawCompairMap(void* Dest, void* Source, TRefCountPtr<FTypeDesc> ElementType, TRefCountPtr<FTypeDesc> ValueType)
+{
+    return false;
+}
+
+template<typename T>
+void RawDctorValue(void* Dest)
+{
+    ((T*)Dest) ->~T();
+}
+//todo not finish yet
+void RawDctorArray(void* Array, TRefCountPtr<FTypeDesc> ElementType)
+{
+    auto ADe = (FScriptArray*)Array;
+
+    for (int32 Di = 0; Di < ADe->Num(); ++Di)
+    {
+        ElementType->DestroyValue((uint8*)ADe->GetData() + ElementType->GetSize() * Di);
+    }
+    ADe->Empty(0, ElementType->GetSize(), ElementType->GetAlign());
+    ADe->~FScriptArray();
+}
+//todo not finish yet
+void RawDctorMap(void* Array, TRefCountPtr<FTypeDesc> KeyType, TRefCountPtr<FTypeDesc> ValueType)
+{
+    auto ADe = (FScriptMap*)Array;
+
+    auto Layout = FScriptMap::GetScriptLayout(KeyType->GetSize(), KeyType->GetAlign(), ValueType->GetSize(), ValueType->GetAlign());
+
+    for (int32 Di = 0; Di < ADe->Num(); ++Di)
+    {
+        auto PairPtr = ADe->GetData(Di, Layout);
+        KeyType->DestroyValue(PairPtr);
+        ValueType->DestroyValue((uint8*)PairPtr + Layout.ValueOffset);
+    }
+    ADe->Empty(0, Layout);
+    ADe->~FScriptMap();
+}
+//todo not finish yet
+void RawDctorSet(void* Array, TRefCountPtr<FTypeDesc> ElementType)
+{
+    auto ADe = (FScriptSet*)Array;
+
+    auto Layout = FScriptSet::GetScriptLayout(ElementType->GetSize(), ElementType->GetAlign());
+
+    for (int32 Di = 0; Di < ADe->Num(); ++Di)
+    {
+        auto PairPtr = ADe->GetData(Di, Layout);
+        ElementType->DestroyValue(PairPtr);
+    }
+    ADe->Empty(0, Layout);
+    ADe->~FScriptSet();
+}
+
+template<typename T>
+void RawSetValue(void* Dest, void* Source)
+{
+    *(T*)Dest = *(T*)Source;
+}
+void RawSetValueScriptArray(void* Dest, void* Source, TRefCountPtr<FTypeDesc> ElementType)
+{
+    auto ADe = (FScriptArray*)Dest;
+    auto ASo = (FScriptArray*)Source;
+
+    for(int32 Di = 0; Di < ADe->Num(); ++Di)
+    {
+        ElementType->DestroyValue((uint8*)ADe->GetData() + ElementType->GetSize() * Di);
+    }
+    ADe->Empty(0, ElementType->GetSize(), ElementType->GetAlign());
+
+    for(int32 Si = 0; Si < ASo->Num(); ++Si)
+    {
+        ADe->Add(1, ElementType->GetSize(), ElementType->GetAlign());
+        ElementType->InitValue((uint8*)ADe->GetData() + ElementType->GetSize() * Si);
+        ElementType->CopyValue((uint8*)ADe->GetData() + ElementType->GetSize() * Si, (uint8*)ASo->GetData() + ElementType->GetSize() * Si);
+    }
+}
+//todo not finish yet
+void RawSetValueScriptMap(void* Dest, void* Source, TRefCountPtr<FTypeDesc> KeyType, TRefCountPtr<FTypeDesc> ValueType)
+{
+    auto ADe = (FScriptMap*)Dest;
+    auto ASo = (FScriptMap*)Source;
+
+    auto Layout = FScriptMap::GetScriptLayout(KeyType->GetSize(), KeyType->GetAlign(), ValueType->GetSize(), ValueType->GetAlign());
+
+    for(int32 Di = 0; Di < ADe->Num(); ++Di)
+    {
+        auto PairPtr = ADe->GetData(Di, Layout);
+        KeyType->DestroyValue(PairPtr);
+        ValueType->DestroyValue((uint8*)PairPtr + Layout.ValueOffset);
+    }
+    ADe->Empty(0, Layout);
+
+    for(int32 Si = 0; Si < ASo->Num(); ++Si)
+    {
+        auto SiPairPtr = ASo->GetData(Si, Layout);
+        ADe->Add(SiPairPtr, (uint8*)SiPairPtr + Layout.ValueOffset, Layout,
+            [KeyType](const void* KeyV)->uint32
+            {
+                return KeyType->GetTypeHash((void*)KeyV);
+            },
+            [KeyType](const void* A, const void* B)->bool
+            {
+                return KeyType->ValueEqual((void*)A, (void*)B);
+            },
+            [KeyType, SiPairPtr, Layout](void* Key)->void
+            {
+                KeyType->InitValue(Key);
+                KeyType->CopyValue(Key, SiPairPtr);
+            },
+            [ValueType, SiPairPtr, Layout](void* Value)->void
+            {
+                ValueType->InitValue(Value);
+                ValueType->CopyValue(Value, (uint8*)SiPairPtr + Layout.ValueOffset);
+            },
+            [ValueType, SiPairPtr, Layout](void* Value)->void
+            {
+                ValueType->CopyValue(Value, (uint8*)SiPairPtr + Layout.ValueOffset);
+            },
+            [KeyType, Layout](void* Key)->void
+            {
+                KeyType->DestroyValue(Key);
+            },
+            [ValueType, Layout](void* Value)->void
+            {
+                ValueType->DestroyValue(Value);
+            }
+        );
+    }
+}
+//todo not finish yet
+void RawSetValueScriptSet(void* Dest, void* Source, TRefCountPtr<FTypeDesc> KeyType)
+{
+    auto ADe = (FScriptSet*)Dest;
+    auto ASo = (FScriptSet*)Source;
+
+    auto Layout = FScriptSet::GetScriptLayout(KeyType->GetSize(), KeyType->GetAlign());// , ValueType->GetSize(), ValueType->GetAlign());
+
+    for (int32 Di = 0; Di < ADe->Num(); ++Di)
+    {
+        auto PairPtr = ADe->GetData(Di, Layout);
+        KeyType->DestroyValue(PairPtr);
+    }
+    ADe->Empty(0, Layout);
+
+    for (int32 Si = 0; Si < ASo->Num(); ++Si)
+    {
+        auto SiPairPtr = ASo->GetData(Si, Layout);
+
+        ADe->Add(SiPairPtr, Layout,
+            [KeyType](const void* KeyV)->uint32
+            {
+                return KeyType->GetTypeHash((void*)KeyV);
+            },
+            [KeyType](const void* A, const void* B)->bool
+            {
+                return KeyType->ValueEqual((void*)A, (void*)B);
+            },
+            [KeyType, SiPairPtr, Layout](void* Key)->void
+            {
+                KeyType->InitValue(Key);
+                KeyType->CopyValue(Key, SiPairPtr);
+            },
+            [KeyType, Layout](void* Key)->void
+            {
+                KeyType->DestroyValue(Key);
+            }
+        );
+
+    }
+}
+
+
+void FTypeDesc::CopyValue(void* Dest, void* Source) const
+{
+
+    switch (Kind)
+    {
+    case ETypeKind::None: return;
+
+
+    case ETypeKind::Int8: RawSetValue<int8>(Dest, Source); return;
+    case ETypeKind::Int16: RawSetValue<int16>(Dest, Source); return;
+    case ETypeKind::Int32:  RawSetValue<int32>(Dest, Source); return;
+    case ETypeKind::Int64:  RawSetValue<int64>(Dest, Source); return;
+    case ETypeKind::Byte:  RawSetValue<uint8>(Dest, Source); return;
+    case ETypeKind::UInt16:  RawSetValue<uint16>(Dest, Source); return;
+    case ETypeKind::UInt32:  RawSetValue<uint32>(Dest, Source); return;
+    case ETypeKind::UInt64:  RawSetValue<uint64>(Dest, Source); return;
+    case ETypeKind::Float:  RawSetValue<float>(Dest, Source); return;
+    case ETypeKind::Double:  RawSetValue<double>(Dest, Source); return;
+
+    case ETypeKind::Bool:  RawSetValue<bool>(Dest, Source); return;
+    case ETypeKind::BitBool: return;
+    case ETypeKind::String: RawSetValue<FString>(Dest, Source); return;
+    case ETypeKind::Name:  RawSetValue<FName>(Dest, Source); return;
+    case ETypeKind::Text:  RawSetValue<FText>(Dest, Source); return;
+    case ETypeKind::Vector:  RawSetValue<FVector>(Dest, Source); return;
+    case ETypeKind::Rotator:  RawSetValue<FRotator>(Dest, Source); return;
+    case ETypeKind::Quat:  RawSetValue<FQuat>(Dest, Source); return;
+    case ETypeKind::Transform:  RawSetValue<FTransform>(Dest, Source); return;
+    case ETypeKind::Matrix:  RawSetValue<FMatrix>(Dest, Source); return;
+    case ETypeKind::RotationMatrix:  RawSetValue<FRotationMatrix>(Dest, Source); return;
+    case ETypeKind::Color:  RawSetValue<FColor>(Dest, Source); return;
+    case ETypeKind::LinearColor: RawSetValue<FLinearColor>(Dest, Source); return;
+
+
+    case ETypeKind::Array:  RawSetValueScriptArray(Dest, Source, CombineKindSubTypes[0]); return;
+    case ETypeKind::Map:  RawSetValueScriptMap(Dest, Source, CombineKindSubTypes[0], CombineKindSubTypes[1]); return;
+    case ETypeKind::Set:  RawSetValueScriptSet(Dest, Source, CombineKindSubTypes[0]); return;
+
+    case ETypeKind::U_Enum:  RawSetValue<int8>(Dest, Source); return;
+    case ETypeKind::U_ScriptStruct:
+        if (UserDefinedTypePointer.U_ScriptStruct) { UserDefinedTypePointer.U_ScriptStruct->CopyScriptStruct(Dest, Source); } return;
+    case ETypeKind::U_Class: RawSetValue<UObject*>(Dest, Source); return;
+    case ETypeKind::U_Function: return;
+
+    default: return;
+    }
+}
+
+
+void FTypeDesc::DestroyValue(void* ValueAddress) const
+{
+    switch (Kind)
+    {
+    case ETypeKind::None: return;
+
+
+    case ETypeKind::Int8:  ;
+    case ETypeKind::Int16:;
+    case ETypeKind::Int32: 
+    case ETypeKind::Int64: 
+    case ETypeKind::Byte:
+    case ETypeKind::UInt16:
+    case ETypeKind::UInt32:
+    case ETypeKind::UInt64:
+    case ETypeKind::Float:
+    case ETypeKind::Double:
+
+    case ETypeKind::Bool: 
+    case ETypeKind::BitBool:
+    	return;
+    case ETypeKind::String: RawDctorValue<FString>(ValueAddress); return;
+    case ETypeKind::Name:  RawDctorValue<FName>(ValueAddress); return;
+    case ETypeKind::Text:  RawDctorValue<FText>(ValueAddress); return;
+    case ETypeKind::Vector:  RawDctorValue<FVector>(ValueAddress); return;
+    case ETypeKind::Rotator:  RawDctorValue<FRotator>(ValueAddress);; return;
+    case ETypeKind::Quat:  RawDctorValue<FQuat>(ValueAddress); return;
+    case ETypeKind::Transform:  RawDctorValue<FTransform>(ValueAddress); return;
+    case ETypeKind::Matrix:  RawDctorValue<FMatrix>(ValueAddress);; return;
+    case ETypeKind::RotationMatrix:  RawDctorValue<FRotationMatrix>(ValueAddress);; return;
+    case ETypeKind::Color:  RawDctorValue<FColor>(ValueAddress); return;
+    case ETypeKind::LinearColor: RawDctorValue<FLinearColor>(ValueAddress); return;
+
+
+    case ETypeKind::Array:  RawDctorArray(ValueAddress, CombineKindSubTypes[0]); return;
+    case ETypeKind::Map:  RawDctorMap(ValueAddress, CombineKindSubTypes[0], CombineKindSubTypes[1]); return;
+    case ETypeKind::Set:  RawDctorSet(ValueAddress, CombineKindSubTypes[0]); return;
+
+    case ETypeKind::U_Enum: return;
+    case ETypeKind::U_ScriptStruct:
+        if (UserDefinedTypePointer.U_ScriptStruct) { UserDefinedTypePointer.U_ScriptStruct->DestroyStruct(ValueAddress); } return;
+    case ETypeKind::U_Class: *(UObject**)ValueAddress = nullptr; return;
+    case ETypeKind::U_Function: return;
+
+    default: return;
+    }
+}
+
+uint32 FTypeDesc::GetTypeHash(void* ValueAddress) const
+{
+    switch (Kind)
+    {
+    case ETypeKind::None: return 0;
+
+
+    case ETypeKind::Int8:return RawGetValueHash<int8>(ValueAddress);
+    case ETypeKind::Int16:return RawGetValueHash<int16>(ValueAddress);
+    case ETypeKind::Int32:return RawGetValueHash<int32>(ValueAddress);
+    case ETypeKind::Int64:return RawGetValueHash<int64>(ValueAddress);
+    case ETypeKind::Byte:return RawGetValueHash<uint8>(ValueAddress);
+    case ETypeKind::UInt16:return RawGetValueHash<uint16>(ValueAddress);
+    case ETypeKind::UInt32:return RawGetValueHash<uint32>(ValueAddress);
+    case ETypeKind::UInt64:return RawGetValueHash<uint64>(ValueAddress);
+    case ETypeKind::Float:return RawGetValueHash<float>(ValueAddress);
+    case ETypeKind::Double:return RawGetValueHash<double>(ValueAddress);
+
+    case ETypeKind::Bool:return RawGetValueHash<bool>(ValueAddress);
+    case ETypeKind::BitBool:
+        return 0;
+    case ETypeKind::String: return RawGetValueHash<FString>(ValueAddress);
+    case ETypeKind::Name:  return RawGetValueHash<FName>(ValueAddress);
+    case ETypeKind::Text:  return 0;
+    case ETypeKind::Vector:  return RawGetValueHash<FVector>(ValueAddress);
+    case ETypeKind::Rotator:  return 0;
+    case ETypeKind::Quat:  return RawGetValueHash<FQuat>(ValueAddress);
+    case ETypeKind::Transform:  return RawGetValueHash<FTransform>(ValueAddress);
+    case ETypeKind::Matrix:  return 0;
+    case ETypeKind::RotationMatrix: return 0;
+    case ETypeKind::Color:  return RawGetValueHash<FColor>(ValueAddress);
+    case ETypeKind::LinearColor: return RawGetValueHash<FLinearColor>(ValueAddress);
+
+
+    case ETypeKind::Array:  return 0;
+    case ETypeKind::Map:  return 0;
+    case ETypeKind::Set:  return 0;
+
+    case ETypeKind::U_Enum: return RawGetValueHash<uint8>(ValueAddress);
+    case ETypeKind::U_ScriptStruct:
+        if (UserDefinedTypePointer.U_ScriptStruct) { return UserDefinedTypePointer.U_ScriptStruct->GetStructTypeHash(ValueAddress); } return 0;
+    case ETypeKind::U_Class: return RawGetValueHash<UObject*>(ValueAddress);
+    case ETypeKind::U_Function: return RawGetValueHash<UFunction*>(UserDefinedTypePointer.U_Function);
+
+    default: return 0;
+    }
+}
+
+bool FTypeDesc::ValueEqual(void* Dest, void* Source) const
+{
+    switch (Kind)
+    {
+    case ETypeKind::None: return false;
+
+
+    case ETypeKind::Int8: return RawCompairValue<int8>(Dest, Source); ;
+    case ETypeKind::Int16:return RawCompairValue<int16>(Dest, Source); ;
+    case ETypeKind::Int32: return RawCompairValue<int32>(Dest, Source); ;
+    case ETypeKind::Int64:return  RawCompairValue<int64>(Dest, Source); ;
+    case ETypeKind::Byte: return RawCompairValue<uint8>(Dest, Source); ;
+    case ETypeKind::UInt16:return  RawCompairValue<uint16>(Dest, Source); ;
+    case ETypeKind::UInt32:return  RawCompairValue<uint32>(Dest, Source); ;
+    case ETypeKind::UInt64:return  RawCompairValue<uint64>(Dest, Source); ;
+    case ETypeKind::Float:return  RawCompairValue<float>(Dest, Source); ;
+    case ETypeKind::Double:return  RawCompairValue<double>(Dest, Source); ;
+
+    case ETypeKind::Bool: return RawCompairValue<bool>(Dest, Source); ;
+    case ETypeKind::BitBool: return false;
+    case ETypeKind::String:return RawCompairValue<FString>(Dest, Source); ;
+    case ETypeKind::Name:return  RawCompairValue<FName>(Dest, Source); ;
+    case ETypeKind::Text:return  false; ;
+    case ETypeKind::Vector: return RawCompairValue<FVector>(Dest, Source); ;
+    case ETypeKind::Rotator:return  RawCompairValue<FRotator>(Dest, Source); ;
+    case ETypeKind::Quat:return  RawCompairValue<FQuat>(Dest, Source); ;
+    case ETypeKind::Transform: return RawCompairValue<FTransform>(Dest, Source); ;
+    case ETypeKind::Matrix:return  RawCompairValue<FMatrix>(Dest, Source); ;
+    case ETypeKind::RotationMatrix:return  RawCompairValue<FRotationMatrix>(Dest, Source); ;
+    case ETypeKind::Color: return RawCompairValue<FColor>(Dest, Source); ;
+    case ETypeKind::LinearColor:return RawCompairValue<FLinearColor>(Dest, Source); ;
+
+
+    case ETypeKind::Array:  return RawCompairArray(Dest, Source, CombineKindSubTypes[0]); ; //todo
+    case ETypeKind::Map: return RawCompairMap(Dest, Source, CombineKindSubTypes[0], CombineKindSubTypes[1]); //todo
+    case ETypeKind::Set: return RawCompairSet(Dest, Source, CombineKindSubTypes[0]); //todo
+
+    case ETypeKind::U_Enum: return RawCompairValue<int8>(Dest, Source); ;
+    case ETypeKind::U_ScriptStruct:
+        if (UserDefinedTypePointer.U_ScriptStruct) { return
+        	UserDefinedTypePointer.U_ScriptStruct->CompareScriptStruct(Dest, Source, EPropertyPortFlags::PPF_None);
+        }
+    	return false;
+    case ETypeKind::U_Class:return RawCompairValue<UObject*>(Dest, Source); ;
+    case ETypeKind::U_Function: return true;
+
+    default: return false;
     }
 }
 
@@ -816,10 +1428,32 @@ int32 FTypeDesc::GetSizePreDefinedKind(ETypeKind InKind)
     }
 }
 
-FTypeDesc* FTypeDesc::AquireClassDescByUEType(UField* UEType)
+
+
+TRefCountPtr<FTypeDesc> FTypeDesc::AquireClassDescByUEType(UField* UEType)
 {
-    static UUETypeDescContainer* Container = NewObject<UUETypeDescContainer>();
-    Container->AddToRoot();
+    struct FContainerInit
+    {
+        UUETypeDescContainer* Container;
+        void PostGC()
+        {
+	        for(auto&& It = Container->Map.CreateIterator(); It; ++It)
+	        {
+		        if(It->Value->UserDefinedTypePointer.Pointer == nullptr)
+		        {
+                    It.RemoveCurrent();
+		        }
+	        }
+        }
+        FContainerInit()
+        {
+            Container = NewObject<UUETypeDescContainer>();
+            Container->AddToRoot();
+            FCoreUObjectDelegates::GetPostGarbageCollect().AddRaw(this, &FContainerInit::PostGC);
+        }
+        UUETypeDescContainer* operator->() { return Container; }
+    };
+    static FContainerInit Container;
     FScopeLock Lock(&Container->CS);
     if(UEType)
     {
@@ -843,28 +1477,28 @@ FTypeDesc* FTypeDesc::AquireClassDescByUEType(UField* UEType)
         if(Kind != ETypeKind::None)
         {
             auto&& Item = Container->Map.FindOrAdd(UEType);
-            if (!Item.TypeDesc)
+            if (!Item.GetReference())
             {
-                Item.TypeDesc = new FTypeDesc();
+                Item = new FTypeDesc();
             }
-            check(Item.TypeDesc->Kind == ETypeKind::None ||
-                (Item.TypeDesc->Kind >= ETypeKind::UserDefinedKindBegin && Item.TypeDesc->Kind < ETypeKind::UserDefinedKindEnd));
-            Item.TypeDesc->Kind = Kind;
-            if(!Item.TypeDesc->UserDefinedTypePointer.Pointer)
+            check(Item->Kind == ETypeKind::None ||
+                (Item->Kind >= ETypeKind::UserDefinedKindBegin && Item->Kind < ETypeKind::UserDefinedKindEnd));
+            Item->Kind = Kind;
+            if(!Item->UserDefinedTypePointer.Pointer)
             {
-                Item.TypeDesc->UserDefinedTypePointer.Pointer = UEType;
+                Item->UserDefinedTypePointer.Pointer = UEType;
             }
             else
             {
-                check(Item.TypeDesc->UserDefinedTypePointer.Pointer == UEType);
+                check(Item->UserDefinedTypePointer.Pointer == UEType);
             }
-            return Item.TypeDesc;
+            return Item;
         }
     }
     return nullptr;
 }
 
-FTypeDesc* FTypeDesc::AquireClassDescByPreDefinedKind(ETypeKind InKind)
+TRefCountPtr<FTypeDesc> FTypeDesc::AquireClassDescByPreDefinedKind(ETypeKind InKind)
 {
     static FCriticalSection CS;
     FScopeLock Lock(&CS);
@@ -872,19 +1506,100 @@ FTypeDesc* FTypeDesc::AquireClassDescByPreDefinedKind(ETypeKind InKind)
     {
         static TMap<ETypeKind, FTypeDescRefCount> Map;
         auto&& Item = Map.FindOrAdd(InKind);
-        if(Item.TypeDesc->Kind == ETypeKind::None)
+        if(Item->Kind == ETypeKind::None)
         {
-            Item.TypeDesc->Kind = InKind;
+            Item->Kind = InKind;
         }
-        check(Item.TypeDesc->Kind == InKind);
-        return Item.TypeDesc;
+        check(Item->Kind == InKind);
+        return Item;
     }
     return nullptr;
 }
 
-FTypeDesc* FTypeDesc::AquireClassDescByCombineKind(ETypeKind InKind, const TArray<FTypeDesc*>& InKey)
+TRefCountPtr<FTypeDesc> FTypeDesc::AquireClassDescByCombineKind(ETypeKind InKind, const TArray<TRefCountPtr<FTypeDesc>>& InKey)
 {
+    static FCriticalSection CS;
+    FScopeLock Lock(&CS);
 
+    struct FContainer
+    {
+        TMap<TArray<TRefCountPtr<FTypeDesc>>, FTypeDescRefCount> Map[(uint16)ETypeKind::CombineKindEnd - (uint16)ETypeKind::CombineKindBegin];
+        void PostGC()
+        {
+	        for(auto&& M : Map)
+	        {
+		        for(auto&& It = M.CreateIterator(); It; ++It)
+		        {
+			        if(It->Value.GetRefCount() == 1)
+			        {
+                        It.RemoveCurrent();
+			        }
+		        }
+	        }
+        }
+        FContainer()
+        {
+            FCoreUObjectDelegates::GetPostGarbageCollect().AddRaw(this, &FContainer::PostGC);
+        }
+
+        
+    };
+    static FContainer Container;
+    //static TMap<TArray<TRefCountPtr<FTypeDesc>>, FTypeDescRefCount> Map[(uint16)ETypeKind::CombineKindEnd - (uint16)ETypeKind::CombineKindBegin];
+
+    if(InKind >= ETypeKind::CombineKindBegin && InKind < ETypeKind::CombineKindEnd)
+    {
+	    switch(InKind)
+	    {
+        case ETypeKind::Set:
+	    case ETypeKind::Array:
+            if(InKey.Num() == 1 && InKey[0] != nullptr)
+		    {
+                auto&& V = Container.Map[(uint16)InKind - (uint16)ETypeKind::CombineKindBegin].FindOrAdd(InKey);
+                if(!V.GetReference())
+                {
+                    V = new FTypeDesc();
+                    V->Kind = InKind;
+                }
+                check(V->Kind == InKind && (V->CombineKindSubTypes.Num() == 1 || V->CombineKindSubTypes.IsEmpty()) );
+                if(V->CombineKindSubTypes.IsEmpty())
+                {
+                    V->CombineKindSubTypes = InKey;
+                }
+                else
+                {
+                    check(V->CombineKindSubTypes[0] == InKey[0]);
+                }
+                return V;
+		    }
+            break;
+
+	    case ETypeKind::Map:
+            if(InKey.Num() == 2 && InKey[0] != nullptr && InKey[1] != nullptr)
+            {
+                auto&& V = Container.Map[(uint16)InKind - (uint16)ETypeKind::CombineKindBegin].FindOrAdd(InKey);
+                if (!V.GetReference())
+                {
+                    V = new FTypeDesc();
+                    V->Kind = InKind;
+                    check(V->Kind == InKind && (V->CombineKindSubTypes.Num() == 2 || V->CombineKindSubTypes.IsEmpty()));
+                    if (V->CombineKindSubTypes.IsEmpty())
+                    {
+                        V->CombineKindSubTypes = InKey;
+                    }
+                    else
+                    {
+                        check(V->CombineKindSubTypes[0] == InKey[0] && V->CombineKindSubTypes[1] == InKey[1]);
+                    }
+                    return V;
+                }
+            }
+            break;
+        default:;
+	    }
+    }
+
+    return nullptr;
 }
 
 void FLuaUStructData::Clear()
