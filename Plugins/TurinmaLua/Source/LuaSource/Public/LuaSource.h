@@ -76,6 +76,8 @@ enum class ETypeKind : uint16
 	Array = CombineKindBegin,
 	Map,
 	Set,
+	Delegate,
+	MulticastDelegate,
 	CombineKindEnd,
 
 
@@ -146,7 +148,7 @@ public:
 	LUASOURCE_API static void AddReferencedObjects(UObject* InThis, FReferenceCollector& Collector);
 };
 
-struct FLuaUEValue
+struct FLuaUEValue : public FCustomMemoryItemThirdParty
 {
 	//static constexpr int32 GetMaxInlineSize()
 	//{
@@ -168,22 +170,61 @@ struct FLuaUEValue
 	//	return MaxInlineSize;
 	//}
 
+	TCustomMemoryHandle<FLuaUEValue> Owner = nullptr; //if onwer is not null this value represent a part of other value
+
 	static constexpr int32 MaxInlineSize = 256;
+
+	int32 AllValueIndex = -1;
+	mutable bool Marked = false;
 
 	FTypeDescRefCount TypeDesc;
 	bool bHasData = false;
 	TAlignedBytes<MaxInlineSize, alignof(std::max_align_t)> InnerData;
-	
+
+	bool bHasDestroyedData = false;
+
 	FLuaUEValue() : TypeDesc(nullptr), InnerData()
 	{
 		FMemory::Memzero(&InnerData, sizeof(InnerData));
 	}
 
-	void* GetData()
+	void DestroyData()
 	{
+		if(!IsPartOfOthers() && GetData())
+		{
+			TypeDesc->DestroyValue(GetData());
+		}
+		bHasDestroyedData = true;
+	}
+
+	bool IsHasValidData() const
+	{
+		if (bHasData && !bHasDestroyedData && TypeDesc.IsValid() && TypeDesc->GetSize() > 0)
+		{
+			if(IsPartOfOthers())
+			{
+				return Owner && Owner->IsHasValidData();
+			}
+			return true;
+		}
+		return false;
+	}
+
+	bool IsPartOfOthers() const
+	{
+		return Owner.EverHasValueUntilReset();
+	}
+
+	void* GetData() 
+	{
+		if(!IsHasValidData())
+		{
+			return nullptr;
+		}
+
 		if(bHasData && TypeDesc.IsValid() && TypeDesc->GetSize() > 0)
 		{
-			if(TypeDesc->GetSize() > MaxInlineSize)
+			if(TypeDesc->GetSize() > MaxInlineSize || IsPartOfOthers())
 			{
 				return *(void**)(&InnerData);
 			}
@@ -193,6 +234,37 @@ struct FLuaUEValue
 			}
 		}
 		return nullptr;
+	}
+
+	const void* GetData() const
+	{
+		if (!IsHasValidData())
+		{
+			return nullptr;
+		}
+
+		if (bHasData && TypeDesc.IsValid() && TypeDesc->GetSize() > 0)
+		{
+			if (TypeDesc->GetSize() > MaxInlineSize || IsPartOfOthers())
+			{
+				return *(void**)(&InnerData);
+			}
+			else
+			{
+				return &InnerData;
+			}
+		}
+		return nullptr;
+	}
+
+	void InitDataAsPartOfOther(void* PartOfOther)
+	{
+		if (!bHasData && TypeDesc.IsValid() && TypeDesc->GetSize() > 0)
+		{
+			//void* ObjectMem = FMemory::Malloc(sizeof(void*));
+			*(void**)(&InnerData) = PartOfOther;
+			bHasData = true;
+		}
 	}
 
 	void InitData()
@@ -214,7 +286,27 @@ struct FLuaUEValue
 		}
 	}
 
-	void AddReferencedObject(UObject* Owner, FReferenceCollector& Collector, bool bStrong);
+	void CopyFrom(void* Other)
+	{
+		if(GetData() != nullptr)
+		{
+			TypeDesc->CopyValue(GetData(), Other);
+		}
+	}
+
+	void CopyFrom(const FLuaUEValue& Other)
+	{
+		if(GetData() && Other.GetData() && TypeDesc == Other.TypeDesc)
+		{
+			if(GetData() == Other.GetData())
+			{
+				return;
+			}
+			TypeDesc->CopyValue(GetData(), (void*)Other.GetData());
+		}
+	}
+
+	void AddReferencedObject(UObject* Oter, FReferenceCollector& Collector, bool bStrong);
 	
 };
 
@@ -523,12 +615,43 @@ class ULuaState : public UObject
 	void LockLua();
 	void UnlockLua();
 
-	LUASOURCE_API void PushLuaUEData(void* Value, UStruct* DataType, EUEDataType Type, TCustomMemoryHandle<FLuaUEData> Oter, int32 MaxCount = 1);
+	TArray<int32> UnusedAllValueIndex;
+	TArray<FLuaUEValue*> AllValues;
+
+	void PushToAllValues(FLuaUEValue* V)
+	{
+		int32 ID;
+		if(UnusedAllValueIndex.Num() > 0)
+		{
+			ID = UnusedAllValueIndex.Last();
+			UnusedAllValueIndex.Pop();
+		}
+		else
+		{
+			ID = AllValues.Num();
+			AllValues.AddZeroed();
+		}
+		V->AllValueIndex = ID;
+		AllValues[ID] = V;
+	}
+	void RemoveFormAllValues(FLuaUEValue* V)
+	{
+		AllValues[V->AllValueIndex] = nullptr;
+		UnusedAllValueIndex.Push(V->AllValueIndex);
+	}
+
+
+	LUASOURCE_API void PushLuaUEValue(void* Value, const TRefCountPtr<FTypeDesc>& Type);
+	LUASOURCE_API void PushLuaUEValue(void* Value, const FLuaUEValue& PartOfWhom, const TRefCountPtr<FTypeDesc>& Type);
 	LUASOURCE_API void PushUStructCopy(void* Value, UScriptStruct* DataType);
+
+
+	//LUASOURCE_API void PushLuaUEData(void* Value, UStruct* DataType, EUEDataType Type, TCustomMemoryHandle<FLuaUEData> Oter, int32 MaxCount = 1);
+	
 public:
 
-	static const char* const LuaUEDataMetatableName;
-
+	LUASOURCE_API static const char* const LuaUEDataMetatableName;
+	LUASOURCE_API static const char* const LuaUEValueMetatableName;
 	virtual void BeginDestroy() override;
 
 	UFUNCTION(BlueprintCallable)
@@ -543,12 +666,16 @@ public:
 	UFUNCTION(BlueprintCallable)
 	void PushUObject(UObject* Obj)
 	{
-		PushLuaUEData(Obj, Obj->GetClass(), EUEDataType::Object, nullptr);
+		auto&& R = FTypeDesc::AquireClassDescByUEType(Obj->GetClass());
+		PushLuaUEValue(Obj, R);
+		//PushLuaUEData(Obj, Obj->GetClass(), EUEDataType::Object, nullptr);
 	}
 	UFUNCTION(BlueprintCallable)
 	void PushUStructDefault(UScriptStruct* Struct)
 	{
-		PushUStructCopy(nullptr, Struct);
+		auto&& R = FTypeDesc::AquireClassDescByUEType(Struct);
+		PushLuaUEValue(nullptr, R);
+		//PushUStructCopy(nullptr, Struct);
 	}
 	UFUNCTION(BlueprintCallable, CustomThunk, meta = (CustomStructureParam = "CustomStruct"))
 	void PushUStructCopy(const FDummyStruct& CustomStruct);

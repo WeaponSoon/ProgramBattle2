@@ -235,6 +235,11 @@ class LUASOURCE_API FCustomMemoryHandleBase
 public:
 	virtual ~FCustomMemoryHandleBase() = default;
 
+	bool EverHasValueUntilReset() const
+	{
+		return NewInnerIdPair.PtrPair != nullptr;
+	}
+
 protected:
 	std::ptrdiff_t ItemDiff = (std::ptrdiff_t)0;
 	 

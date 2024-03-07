@@ -769,11 +769,15 @@ void UUETypeDescContainer::AddReferencedObjects(UObject* InThis, FReferenceColle
     }
 }
 
-void FLuaUEValue::AddReferencedObject(UObject* Owner, FReferenceCollector& Collector, bool bStrong)
+void FLuaUEValue::AddReferencedObject(UObject* Oter, FReferenceCollector& Collector, bool bStrong)
 {
-	if(TypeDesc.IsValid())
+    if(bStrong)
+    {
+        Marked = true;
+    }
+	if(TypeDesc.IsValid() && !Owner)
 	{
-        TypeDesc->AddReferencedObject(Owner, GetData(), Collector, bStrong);
+        TypeDesc->AddReferencedObject(Oter, GetData(), Collector, bStrong);
 	}
 }
 
@@ -855,12 +859,13 @@ void FTypeDesc::AddReferencedObject(UObject* Oter, void* PtrToValue, FReferenceC
         }
 	    }
         return;
-
+    case ETypeKind::Delegate: return;
+    case ETypeKind::MulticastDelegate: return;
     case ETypeKind::U_Enum: return;
     case ETypeKind::U_ScriptStruct:
         if (UserDefinedTypePointer.U_ScriptStruct)
         {
-            Collector.AddPropertyReferences(UserDefinedTypePointer.U_ScriptStruct, PtrToValue);
+            Collector.AddPropertyReferences(UserDefinedTypePointer.U_ScriptStruct, PtrToValue, Oter);
         }
     	return;
     case ETypeKind::U_Class:
@@ -877,7 +882,7 @@ void FTypeDesc::AddReferencedObject(UObject* Oter, void* PtrToValue, FReferenceC
         return;
     case ETypeKind::U_Function:
 	    {
-		    
+        Collector.AddReferencedObject(UserDefinedTypePointer.U_Function, Oter);
 	    }
         return;
 
@@ -930,6 +935,8 @@ int32 FTypeDesc::GetAlign() const
     case ETypeKind::Array: return alignof(FScriptArray);
     case ETypeKind::Map: return alignof(FScriptMap);
     case ETypeKind::Set: return alignof(FScriptSet);
+    case ETypeKind::Delegate: return alignof(FScriptDelegate);
+    case ETypeKind::MulticastDelegate: return alignof(FMulticastScriptDelegate);
 
     case ETypeKind::U_Enum: return alignof(uint8);
     case ETypeKind::U_ScriptStruct: return UserDefinedTypePointer.U_ScriptStruct ? UserDefinedTypePointer.U_ScriptStruct->GetMinAlignment() : 0;
@@ -976,6 +983,8 @@ void FTypeDesc::InitValue(void* ValueAddress) const
     case ETypeKind::Array: new (ValueAddress) FScriptArray(); return;
     case ETypeKind::Map: new (ValueAddress) FScriptMap(); return;
     case ETypeKind::Set: new (ValueAddress) FScriptSet(); return;
+    case ETypeKind::Delegate: new (ValueAddress) FScriptDelegate(); return;
+    case ETypeKind::MulticastDelegate: new (ValueAddress) FMulticastScriptDelegate(); return;
 
     case ETypeKind::U_Enum: new (ValueAddress) int8(0); return;
     case ETypeKind::U_ScriptStruct: 
@@ -1006,17 +1015,73 @@ bool RawCompairValue<FTransform>(void* Dest, void* Source)
 //todo not finish yet
 bool RawCompairArray(void* Dest, void* Source, TRefCountPtr<FTypeDesc> ElementType)
 {
-    return false;
+    auto ADe = (FScriptArray*)Dest;
+    auto ASo = (FScriptArray*)Source;
+
+    if(ADe->Num() != ASo->Num())
+    {
+        return false;
+    }
+    for (int32 Di = 0; Di < ADe->Num(); ++Di)
+    {
+        if(!ElementType->ValueEqual((uint8*)ADe->GetData() + ElementType->GetSize() * Di, (uint8*)ASo->GetData() + ElementType->GetSize() * Di))
+        {
+            return false;
+        }
+    }
+    return true;
 }
 //todo not finish yet
 bool RawCompairSet(void* Dest, void* Source, TRefCountPtr<FTypeDesc> ElementType)
 {
-    return false;
+    auto ADe = (FScriptSet*)Dest;
+    auto ASo = (FScriptSet*)Source;
+    if (ADe->Num() != ASo->Num())
+    {
+        return false;
+    }
+
+    auto Layout = FScriptSet::GetScriptLayout(ElementType->GetSize(), ElementType->GetAlign());
+
+    for (int32 Di = 0; Di < ADe->Num(); ++Di)
+    {
+        auto PairPtr1 = ADe->GetData(Di, Layout);
+        auto PairPtr2 = ASo->GetData(Di, Layout);
+        if(!ElementType->ValueEqual(PairPtr1, PairPtr2))
+        {
+            return false;
+        }
+    }
+    return true;
 }
 //todo not finish yet
 bool RawCompairMap(void* Dest, void* Source, TRefCountPtr<FTypeDesc> ElementType, TRefCountPtr<FTypeDesc> ValueType)
 {
-    return false;
+    auto ADe = (FScriptMap*)Dest;
+    auto ASo = (FScriptMap*)Source;
+
+    auto Layout = FScriptMap::GetScriptLayout(ElementType->GetSize(), ElementType->GetAlign(), ValueType->GetSize(), ValueType->GetAlign());
+
+    if(ADe->Num() != ASo->Num())
+    {
+        return false;
+    }
+
+    for (int32 Di = 0; Di < ADe->Num(); ++Di)
+    {
+        auto PairPtr1 = ADe->GetData(Di, Layout);
+        auto PairPtr2 = ASo->GetData(Di, Layout);
+        if(!ElementType->ValueEqual(PairPtr1, PairPtr2))
+        {
+            return false;
+        }
+        if(!ValueType->ValueEqual((uint8*)PairPtr1 + Layout.ValueOffset, (uint8*)PairPtr2 + Layout.ValueOffset))
+        {
+            return false;
+        }
+    }
+
+    return true;
 }
 
 template<typename T>
@@ -1224,6 +1289,8 @@ void FTypeDesc::CopyValue(void* Dest, void* Source) const
     case ETypeKind::Array:  RawSetValueScriptArray(Dest, Source, CombineKindSubTypes[0]); return;
     case ETypeKind::Map:  RawSetValueScriptMap(Dest, Source, CombineKindSubTypes[0], CombineKindSubTypes[1]); return;
     case ETypeKind::Set:  RawSetValueScriptSet(Dest, Source, CombineKindSubTypes[0]); return;
+    case ETypeKind::Delegate: RawSetValue<FScriptDelegate>(Dest, Source); return;
+    case ETypeKind::MulticastDelegate: RawSetValue<FMulticastScriptDelegate>(Dest, Source); return;
 
     case ETypeKind::U_Enum:  RawSetValue<int8>(Dest, Source); return;
     case ETypeKind::U_ScriptStruct:
@@ -1273,6 +1340,8 @@ void FTypeDesc::DestroyValue(void* ValueAddress) const
     case ETypeKind::Array:  RawDctorArray(ValueAddress, CombineKindSubTypes[0]); return;
     case ETypeKind::Map:  RawDctorMap(ValueAddress, CombineKindSubTypes[0], CombineKindSubTypes[1]); return;
     case ETypeKind::Set:  RawDctorSet(ValueAddress, CombineKindSubTypes[0]); return;
+    case ETypeKind::Delegate: RawDctorValue<FScriptDelegate>(ValueAddress); return;
+    case ETypeKind::MulticastDelegate: RawDctorValue<FMulticastScriptDelegate>(ValueAddress); return;
 
     case ETypeKind::U_Enum: return;
     case ETypeKind::U_ScriptStruct:
@@ -1321,6 +1390,8 @@ uint32 FTypeDesc::GetTypeHash(void* ValueAddress) const
     case ETypeKind::Array:  return 0;
     case ETypeKind::Map:  return 0;
     case ETypeKind::Set:  return 0;
+    case ETypeKind::Delegate: return 0;
+    case ETypeKind::MulticastDelegate: return 0;
 
     case ETypeKind::U_Enum: return RawGetValueHash<uint8>(ValueAddress);
     case ETypeKind::U_ScriptStruct:
@@ -1368,6 +1439,8 @@ bool FTypeDesc::ValueEqual(void* Dest, void* Source) const
     case ETypeKind::Array:  return RawCompairArray(Dest, Source, CombineKindSubTypes[0]); ; //todo
     case ETypeKind::Map: return RawCompairMap(Dest, Source, CombineKindSubTypes[0], CombineKindSubTypes[1]); //todo
     case ETypeKind::Set: return RawCompairSet(Dest, Source, CombineKindSubTypes[0]); //todo
+    case ETypeKind::Delegate: return RawCompairValue<FScriptDelegate>(Dest, Source); 
+    case ETypeKind::MulticastDelegate: return false;
 
     case ETypeKind::U_Enum: return RawCompairValue<int8>(Dest, Source); ;
     case ETypeKind::U_ScriptStruct:
@@ -1418,6 +1491,8 @@ int32 FTypeDesc::GetSizePreDefinedKind(ETypeKind InKind)
     case ETypeKind::Array: return sizeof(FScriptArray);
     case ETypeKind::Map: return sizeof(FScriptMap);
     case ETypeKind::Set: return sizeof(FScriptSet);
+    case ETypeKind::Delegate: return sizeof(FScriptDelegate);
+    case ETypeKind::MulticastDelegate: return sizeof(FMulticastScriptDelegate);
 
     case ETypeKind::U_Enum: return sizeof(uint8);
     case ETypeKind::U_ScriptStruct: return 0;
@@ -1595,6 +1670,10 @@ TRefCountPtr<FTypeDesc> FTypeDesc::AquireClassDescByCombineKind(ETypeKind InKind
                 }
             }
             break;
+	    case ETypeKind::Delegate:
+	    case ETypeKind::MulticastDelegate:
+            return Container.Map[(uint16)InKind - (uint16)ETypeKind::CombineKindBegin].FindOrAdd(TArray<TRefCountPtr<FTypeDesc>>());
+            break;
         default:;
 	    }
     }
@@ -1754,6 +1833,15 @@ void ULuaState::OnCollectLuaRefs(FReferenceCollector& Collector, GCObject* o, bo
                     UEData->AddReferencedObjects(this, Collector, w);
                 }
             }
+            else if(metatableName && strcmp(metatableName, LuaUEValueMetatableName) == 0)
+            {
+                void* UD = getudatamem(u);
+                FLuaUEValue* UEValue = (FLuaUEValue*)UD;
+                if (UEValue)
+                {
+                    UEValue->AddReferencedObject(this, Collector, w);
+                }
+            }
         }
     }
 }
@@ -1793,116 +1881,156 @@ void ULuaState::UnlockLua()
     }
 }
 
-void ULuaState::PushLuaUEData(void* Value, UStruct* DataType, EUEDataType Type, TCustomMemoryHandle<FLuaUEData> Oter, int32 MaxCount)
+void ULuaState::PushLuaUEValue(void* Value, const TRefCountPtr<FTypeDesc>& Type)
 {
-    if(!InnerState)
+    if(!InnerState || !Type)
     {
         return;
     }
-    if(Type == EUEDataType::None)
+
+    FLuaUEValue* LuaUD = (FLuaUEValue*)lua_newuserdata(InnerState, sizeof(FLuaUEValue));//ud
+    new (LuaUD) FLuaUEValue();
+    PushToAllValues(LuaUD);
+    LuaUD->TypeDesc = Type;
+    LuaUD->InitData();
+    if(Value)
     {
-        return;
+        LuaUD->CopyFrom(Value);
     }
-    if(ensure((Type != EUEDataType::StructRef && !Oter) || (Type == EUEDataType::StructRef && Oter)))
-    {
-        UScriptStruct* ScriptStruct = nullptr;
-        UClass* Class = nullptr;
-        UObject* Obj = nullptr;
-        UObject** pObj = nullptr;
-        switch (Type)
-        {
-        case EUEDataType::Struct:
-        case EUEDataType::StructRef:
-        {
-            ScriptStruct = Cast<UScriptStruct>(DataType);
-        	if(!ScriptStruct)
-            {
-                return;
-            }
-        }
-        break;
-        case EUEDataType::Object:
-        case EUEDataType::ObjectRef:
-        {
-            Class = Cast<UClass>(DataType);
-			if(Type == EUEDataType::Object)
-			{
-                Obj = (UObject*)Value;
-			}
-            else
-            {
-                pObj = (UObject**)Value;
-                Obj = *pObj;
-            }
-            
-            if (!Class)
-            {
-                return;
-            }
-        }
-        break;
-        default:
-            check(0);
-        }
-
-        if(!ScriptStruct && !Class)
-        {
-            return;
-        }
-
-        if(Obj && !Obj->IsA(Class))
-        {
-            return;
-        }
-
-        FLuaUEData* LuaUD = (FLuaUEData*)lua_newuserdata(InnerState, sizeof(FLuaUEData));//ud
-        new (LuaUD) FLuaUEData();
-        if(!LuaUD)
-        {
-            return;
-        }
-
-        LuaUD->DataType = Type;
-        LuaUD->Oter = Oter;
-
-        luaL_newmetatable(InnerState, LuaUEDataMetatableName); //ud, LuaUEDataMetatableName
-        lua_setmetatable(InnerState, -2);//ud
-
-	    switch (Type)
-	    {
-	    case EUEDataType::StructRef:
-		    {
-            LuaUD->Data.StructRef.SetRef(ScriptStruct, Value, MaxCount);
-		    }
-            break;
-	    case EUEDataType::Object:
-		    {
-            LuaUD->Data.Object.Object = Obj;
-		    }
-            break;
-	    case EUEDataType::ObjectRef:
-		    {
-            LuaUD->Data.ObjectRef.pObject = pObj;
-            LuaUD->Data.ObjectRef.MaxOffsetCount = MaxCount;
-		    }
-            break;
-	    case EUEDataType::Struct:
-		    {
-            LuaUD->Data.Struct.SetData(ScriptStruct, Value);
-		    }
-            break;
-	    default:
-            check(0);
-	    }
-    }
+	luaL_newmetatable(InnerState, LuaUEValueMetatableName); //ud, LuaUEValueMetatableName
+	lua_setmetatable(InnerState, -2);//ud
 }
+
+void ULuaState::PushLuaUEValue(void* Value, const FLuaUEValue& PartOfWhom, const TRefCountPtr<FTypeDesc>& Type)
+{
+    if (!InnerState || !Type || !PartOfWhom.GetData() || !Value)
+    {
+        return;
+    }
+    FLuaUEValue* LuaUD = (FLuaUEValue*)lua_newuserdata(InnerState, sizeof(FLuaUEValue));//ud
+    new (LuaUD) FLuaUEValue();
+    PushToAllValues(LuaUD);
+    LuaUD->Owner = &PartOfWhom;
+    LuaUD->TypeDesc = Type;
+    LuaUD->InitDataAsPartOfOther(Value);
+    luaL_newmetatable(InnerState, LuaUEValueMetatableName); //ud, LuaUEValueMetatableName
+    lua_setmetatable(InnerState, -2);//ud
+}
+
+//void ULuaState::PushLuaUEData(void* Value, UStruct* DataType, EUEDataType Type, TCustomMemoryHandle<FLuaUEData> Oter, int32 MaxCount)
+//{
+//    if(!InnerState)
+//    {
+//        return;
+//    }
+//    if(Type == EUEDataType::None)
+//    {
+//        return;
+//    }
+//    if(ensure((Type != EUEDataType::StructRef && !Oter) || (Type == EUEDataType::StructRef && Oter)))
+//    {
+//        UScriptStruct* ScriptStruct = nullptr;
+//        UClass* Class = nullptr;
+//        UObject* Obj = nullptr;
+//        UObject** pObj = nullptr;
+//        switch (Type)
+//        {
+//        case EUEDataType::Struct:
+//        case EUEDataType::StructRef:
+//        {
+//            ScriptStruct = Cast<UScriptStruct>(DataType);
+//        	if(!ScriptStruct)
+//            {
+//                return;
+//            }
+//        }
+//        break;
+//        case EUEDataType::Object:
+//        case EUEDataType::ObjectRef:
+//        {
+//            Class = Cast<UClass>(DataType);
+//			if(Type == EUEDataType::Object)
+//			{
+//                Obj = (UObject*)Value;
+//			}
+//            else
+//            {
+//                pObj = (UObject**)Value;
+//                Obj = *pObj;
+//            }
+//            
+//            if (!Class)
+//            {
+//                return;
+//            }
+//        }
+//        break;
+//        default:
+//            check(0);
+//        }
+//
+//        if(!ScriptStruct && !Class)
+//        {
+//            return;
+//        }
+//
+//        if(Obj && !Obj->IsA(Class))
+//        {
+//            return;
+//        }
+//
+//        FLuaUEData* LuaUD = (FLuaUEData*)lua_newuserdata(InnerState, sizeof(FLuaUEData));//ud
+//        new (LuaUD) FLuaUEData();
+//        if(!LuaUD)
+//        {
+//            return;
+//        }
+//
+//        LuaUD->DataType = Type;
+//        LuaUD->Oter = Oter;
+//
+//        luaL_newmetatable(InnerState, LuaUEDataMetatableName); //ud, LuaUEDataMetatableName
+//        lua_setmetatable(InnerState, -2);//ud
+//
+//	    switch (Type)
+//	    {
+//	    case EUEDataType::StructRef:
+//		    {
+//            LuaUD->Data.StructRef.SetRef(ScriptStruct, Value, MaxCount);
+//		    }
+//            break;
+//	    case EUEDataType::Object:
+//		    {
+//            LuaUD->Data.Object.Object = Obj;
+//		    }
+//            break;
+//	    case EUEDataType::ObjectRef:
+//		    {
+//            LuaUD->Data.ObjectRef.pObject = pObj;
+//            LuaUD->Data.ObjectRef.MaxOffsetCount = MaxCount;
+//		    }
+//            break;
+//	    case EUEDataType::Struct:
+//		    {
+//            LuaUD->Data.Struct.SetData(ScriptStruct, Value);
+//		    }
+//            break;
+//	    default:
+//            check(0);
+//	    }
+//    }
+//}
 
 void ULuaState::PushUStructCopy(void* Value, UScriptStruct* DataType)
 {
-    PushLuaUEData(Value, DataType, EUEDataType::Struct, nullptr);
+    auto&& R = FTypeDesc::AquireClassDescByUEType(DataType);
+    PushLuaUEValue(Value, R);
+    //PushLuaUEData(Value, DataType, EUEDataType::Struct, nullptr);
 }
 
 const char* const ULuaState::LuaUEDataMetatableName = MAKE_LUA_METATABLE_NAME(FLuaUEData);
+const char* const ULuaState::LuaUEValueMetatableName = MAKE_LUA_METATABLE_NAME(FLuaUEValue);
+
 void ULuaState::BeginDestroy()
 {
 	UObject::BeginDestroy();
@@ -1946,6 +2074,20 @@ int OnDestroyUEDataInLua(lua_State* L)
     return 0;
 }
 
+int OnDestroyUEValueInLua(lua_State* L)
+{
+    lua_getmetatable(L, 1);//obj, metatable
+    lua_getfield(L, -1, "__name");//obj, metatable, LuaUEDataMetatableName
+    if (ensure(strcmp(lua_tostring(L, -1), ULuaState::LuaUEValueMetatableName) == 0))
+    {
+        FLuaUEValue* LuaUEValue = (FLuaUEValue*)lua_touserdata(L, 1);
+        ensure(!LuaUEValue->IsHasValidData());
+        
+        LuaUEValue->~FLuaUEValue();
+    }
+    return 0;
+}
+
 void ULuaState::Init()
 {
     LuaAt.clear();
@@ -1981,10 +2123,20 @@ void ULuaState::Init()
     lua_pushstring(InnerState, "__gc");
     lua_pushcfunction(InnerState, OnDestroyUEDataInLua);
     lua_rawset(InnerState, -3);
-
     //todo finalize LuaUEDataMetatableName
     lua_pop(InnerState, 1);
-    
+
+
+
+    luaL_newmetatable(InnerState, LuaUEValueMetatableName); // LuaUEValueMetatableName
+
+    lua_pushstring(InnerState, "__gc");
+    lua_pushcfunction(InnerState, OnDestroyUEValueInLua);
+    lua_rawset(InnerState, -3);
+    //todo finalize LuaUEValueMetatableName
+    lua_pop(InnerState, 1);
+
+
     FCoreUObjectDelegates::GetPostGarbageCollect().AddUObject(this, &ULuaState::PostGarbageCollect);
 
 
@@ -2018,6 +2170,14 @@ void ULuaState::AddReferencedObjects(UObject* InThis, FReferenceCollector& Colle
 {
     ULuaState* This = CastChecked<ULuaState>(InThis);
 
+    for(auto* V : This->AllValues)
+    {
+	    if(V)
+	    {
+            V->Marked = false;
+	    }
+    }
+
     if(This->InnerState)
     {
         LuaCPPAPI::luaC_foreachgcobj(This->InnerState, [This, &Collector](GCObject* o, bool w, lua_State* l)->void
@@ -2025,6 +2185,25 @@ void ULuaState::AddReferencedObjects(UObject* InThis, FReferenceCollector& Colle
                 This->OnCollectLuaRefs(Collector, o, w, l);
             });
     }
+
+    for (auto&& V : This->AllValues)
+    {
+        if (V)
+        {
+            if(!V->Marked)
+            {
+                V->Marked = false;
+                V->DestroyData();
+                This->RemoveFormAllValues(V);
+                check(!V)
+            }
+            else
+            {
+                V->Marked = false;
+            }
+        }
+    }
+
 }
 
 void LuaLock(lua_State* L)
