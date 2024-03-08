@@ -861,6 +861,8 @@ void FTypeDesc::AddReferencedObject(UObject* Oter, void* PtrToValue, FReferenceC
         return;
     case ETypeKind::Delegate: return;
     case ETypeKind::MulticastDelegate: return;
+    case ETypeKind::WeakObject: return;
+
     case ETypeKind::U_Enum: return;
     case ETypeKind::U_ScriptStruct:
         if (UserDefinedTypePointer.U_ScriptStruct)
@@ -941,6 +943,7 @@ int32 FTypeDesc::GetAlign() const
     case ETypeKind::Set: return alignof(FScriptSet);
     case ETypeKind::Delegate: return alignof(FScriptDelegate);
     case ETypeKind::MulticastDelegate: return alignof(FMulticastScriptDelegate);
+    case ETypeKind::WeakObject: return alignof(FWeakObjectPtr);
 
     case ETypeKind::U_Enum: return alignof(uint8);
     case ETypeKind::U_ScriptStruct: return UserDefinedTypePointer.U_ScriptStruct ? UserDefinedTypePointer.U_ScriptStruct->GetMinAlignment() : 0;
@@ -989,6 +992,7 @@ void FTypeDesc::InitValue(void* ValueAddress) const
     case ETypeKind::Set: new (ValueAddress) FScriptSet(); return;
     case ETypeKind::Delegate: new (ValueAddress) FScriptDelegate(); return;
     case ETypeKind::MulticastDelegate: new (ValueAddress) FMulticastScriptDelegate(); return;
+    case ETypeKind::WeakObject: new (ValueAddress) FWeakObjectPtr(); return;
 
     case ETypeKind::U_Enum: new (ValueAddress) int8(0); return;
     case ETypeKind::U_ScriptStruct: 
@@ -1295,6 +1299,7 @@ void FTypeDesc::CopyValue(void* Dest, void* Source) const
     case ETypeKind::Set:  RawSetValueScriptSet(Dest, Source, CombineKindSubTypes[0]); return;
     case ETypeKind::Delegate: RawSetValue<FScriptDelegate>(Dest, Source); return;
     case ETypeKind::MulticastDelegate: RawSetValue<FMulticastScriptDelegate>(Dest, Source); return;
+    case ETypeKind::WeakObject: RawSetValue<FWeakObjectPtr>(Dest, Source); return;
 
     case ETypeKind::U_Enum:  RawSetValue<int8>(Dest, Source); return;
     case ETypeKind::U_ScriptStruct:
@@ -1346,6 +1351,7 @@ void FTypeDesc::DestroyValue(void* ValueAddress) const
     case ETypeKind::Set:  RawDctorSet(ValueAddress, CombineKindSubTypes[0]); return;
     case ETypeKind::Delegate: RawDctorValue<FScriptDelegate>(ValueAddress); return;
     case ETypeKind::MulticastDelegate: RawDctorValue<FMulticastScriptDelegate>(ValueAddress); return;
+    case ETypeKind::WeakObject: RawDctorValue<FWeakObjectPtr>(ValueAddress); return;
 
     case ETypeKind::U_Enum: return;
     case ETypeKind::U_ScriptStruct:
@@ -1396,6 +1402,7 @@ uint32 FTypeDesc::GetTypeHash(void* ValueAddress) const
     case ETypeKind::Set:  return 0;
     case ETypeKind::Delegate: return 0;
     case ETypeKind::MulticastDelegate: return 0;
+    case ETypeKind::WeakObject: return RawGetValueHash<FWeakObjectPtr>(ValueAddress);
 
     case ETypeKind::U_Enum: return RawGetValueHash<uint8>(ValueAddress);
     case ETypeKind::U_ScriptStruct:
@@ -1445,6 +1452,7 @@ bool FTypeDesc::ValueEqual(void* Dest, void* Source) const
     case ETypeKind::Set: return RawCompairSet(Dest, Source, CombineKindSubTypes[0]); //todo
     case ETypeKind::Delegate: return RawCompairValue<FScriptDelegate>(Dest, Source); 
     case ETypeKind::MulticastDelegate: return false;
+    case ETypeKind::WeakObject: return RawCompairValue<FWeakObjectPtr>(Dest, Source);
 
     case ETypeKind::U_Enum: return RawCompairValue<int8>(Dest, Source); ;
     case ETypeKind::U_ScriptStruct:
@@ -1497,6 +1505,7 @@ int32 FTypeDesc::GetSizePreDefinedKind(ETypeKind InKind)
     case ETypeKind::Set: return sizeof(FScriptSet);
     case ETypeKind::Delegate: return sizeof(FScriptDelegate);
     case ETypeKind::MulticastDelegate: return sizeof(FMulticastScriptDelegate);
+    case ETypeKind::WeakObject: return sizeof(FWeakObjectPtr);
 
     case ETypeKind::U_Enum: return sizeof(uint8);
     case ETypeKind::U_ScriptStruct: return 0;
@@ -1638,6 +1647,7 @@ TRefCountPtr<FTypeDesc> FTypeDesc::AquireClassDescByCombineKind(ETypeKind InKind
     {
 	    switch(InKind)
 	    {
+	    case ETypeKind::WeakObject:
         case ETypeKind::Set:
 	    case ETypeKind::Array:
             if(InKey.Num() == 1 && InKey[0] != nullptr)
@@ -1686,6 +1696,8 @@ TRefCountPtr<FTypeDesc> FTypeDesc::AquireClassDescByCombineKind(ETypeKind InKind
 	    case ETypeKind::MulticastDelegate:
             return Container.Map[(uint16)InKind - (uint16)ETypeKind::CombineKindBegin].FindOrAdd(TArray<TRefCountPtr<FTypeDesc>>());
             break;
+
+
         default:;
 	    }
     }
@@ -1724,6 +1736,8 @@ TRefCountPtr<FTypeDesc> FTypeDesc::AquireClassDescByProperty(FProperty* Proy)
     PushProperty_GetTypedProp(Array);
     PushProperty_GetTypedProp(Set);
     PushProperty_GetTypedProp(Map);
+    PushProperty_GetTypedProp(WeakObject);
+
 
 #undef PushProperty_GetTypedProp
 
@@ -1777,6 +1791,11 @@ TRefCountPtr<FTypeDesc> FTypeDesc::AquireClassDescByProperty(FProperty* Proy)
         auto ValueProperty = AquireClassDescByProperty(MapProperty->ValueProp);
         return AquireClassDescByCombineKind(ETypeKind::Map, { InnerProperty, ValueProperty });
     }
+    if(WeakObjectProperty)
+    {
+        auto InnerType = AquireClassDescByUEType(WeakObjectProperty->PropertyClass);
+        return AquireClassDescByCombineKind(ETypeKind::WeakObject, { InnerType });
+    }
 
     if(DelegateProperty)
     {
@@ -1786,6 +1805,7 @@ TRefCountPtr<FTypeDesc> FTypeDesc::AquireClassDescByProperty(FProperty* Proy)
     {
         return AquireClassDescByCombineKind(ETypeKind::MulticastDelegate, { });
     }
+
     return nullptr;
 }
 
@@ -2166,10 +2186,7 @@ int TurinmaTableIndex(lua_State* L)
         Key.TrimStartAndEndInline();
         if(!Key.IsEmpty())
         {
-            if (!Key.StartsWith(TEXT("/")))
-            {
-                
-            }
+          //  FPackageName::IsValidLongPackageName()
         }
     }
     return 0;
@@ -2208,6 +2225,16 @@ int OnDestroyUEValueInLua(lua_State* L)
         }
         LuaUEValue->~FLuaUEValue();
     }
+    return 0;
+}
+
+int LuaUEValueIndex(lua_State* L)
+{
+    ULuaState* TL = (ULuaState*)G(L)->ud;
+    FLuaUEValue* LuaUEValue = (FLuaUEValue*)lua_touserdata(L, 1);
+
+    //todo index lua UE value
+
     return 0;
 }
 
@@ -2256,6 +2283,11 @@ void ULuaState::Init()
     lua_pushstring(InnerState, "__gc");
     lua_pushcfunction(InnerState, OnDestroyUEValueInLua);
     lua_rawset(InnerState, -3);
+    lua_pushstring(InnerState, "__index");
+    lua_pushcfunction(InnerState, LuaUEValueIndex);
+    lua_rawset(InnerState, -3);
+
+
     //todo finalize LuaUEValueMetatableName
     lua_pop(InnerState, 1);
 

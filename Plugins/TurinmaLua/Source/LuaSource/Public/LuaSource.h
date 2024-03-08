@@ -93,6 +93,7 @@ enum class ETypeKind : uint16
 	Set,
 	Delegate,
 	MulticastDelegate,
+	WeakObject,
 	CombineKindEnd,
 
 
