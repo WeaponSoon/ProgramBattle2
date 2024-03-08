@@ -882,10 +882,14 @@ void FTypeDesc::AddReferencedObject(UObject* Oter, void* PtrToValue, FReferenceC
         return;
     case ETypeKind::U_Function:
 	    {
-        Collector.AddReferencedObject(UserDefinedTypePointer.U_Function, Oter);
+			Collector.AddReferencedObject(UserDefinedTypePointer.U_Function, Oter);
 	    }
         return;
-
+    case ETypeKind::U_Interface:
+	    {
+			Collector.AddReferencedObject(((FScriptInterface*)PtrToValue)->GetObjectRef(), Oter);
+	    }
+        return;
     default: return;
     }
 }
@@ -942,7 +946,7 @@ int32 FTypeDesc::GetAlign() const
     case ETypeKind::U_ScriptStruct: return UserDefinedTypePointer.U_ScriptStruct ? UserDefinedTypePointer.U_ScriptStruct->GetMinAlignment() : 0;
     case ETypeKind::U_Class: return alignof(UObject*);
     case ETypeKind::U_Function: return alignof(UObject*);
-
+    case ETypeKind::U_Interface:return alignof(FScriptInterface);
     default: return alignof(max_align_t);
     }
 }
@@ -991,7 +995,7 @@ void FTypeDesc::InitValue(void* ValueAddress) const
         if (UserDefinedTypePointer.U_ScriptStruct) { UserDefinedTypePointer.U_ScriptStruct->InitializeDefaultValue((uint8*)ValueAddress); } return;
     case ETypeKind::U_Class: new (ValueAddress) UObject* (nullptr); return;
     case ETypeKind::U_Function: return;
-
+    case ETypeKind::U_Interface: new (ValueAddress) FScriptInterface();
     default: return;
     }
 }
@@ -1297,7 +1301,7 @@ void FTypeDesc::CopyValue(void* Dest, void* Source) const
         if (UserDefinedTypePointer.U_ScriptStruct) { UserDefinedTypePointer.U_ScriptStruct->CopyScriptStruct(Dest, Source); } return;
     case ETypeKind::U_Class: RawSetValue<UObject*>(Dest, Source); return;
     case ETypeKind::U_Function: return;
-
+    case ETypeKind::U_Interface: RawSetValue<FScriptInterface>(Dest, Source);
     default: return;
     }
 }
@@ -1348,7 +1352,7 @@ void FTypeDesc::DestroyValue(void* ValueAddress) const
         if (UserDefinedTypePointer.U_ScriptStruct) { UserDefinedTypePointer.U_ScriptStruct->DestroyStruct(ValueAddress); } return;
     case ETypeKind::U_Class: *(UObject**)ValueAddress = nullptr; return;
     case ETypeKind::U_Function: return;
-
+    case ETypeKind::U_Interface: RawDctorValue<FScriptInterface>(ValueAddress);
     default: return;
     }
 }
@@ -1398,7 +1402,7 @@ uint32 FTypeDesc::GetTypeHash(void* ValueAddress) const
         if (UserDefinedTypePointer.U_ScriptStruct) { return UserDefinedTypePointer.U_ScriptStruct->GetStructTypeHash(ValueAddress); } return 0;
     case ETypeKind::U_Class: return RawGetValueHash<UObject*>(ValueAddress);
     case ETypeKind::U_Function: return RawGetValueHash<UFunction*>(UserDefinedTypePointer.U_Function);
-
+    case ETypeKind::U_Interface: return RawGetValueHash<FScriptInterface>(ValueAddress);
     default: return 0;
     }
 }
@@ -1450,7 +1454,7 @@ bool FTypeDesc::ValueEqual(void* Dest, void* Source) const
     	return false;
     case ETypeKind::U_Class:return RawCompairValue<UObject*>(Dest, Source); ;
     case ETypeKind::U_Function: return true;
-
+    case ETypeKind::U_Interface:return RawCompairValue<FScriptInterface>(Dest, Source);
     default: return false;
     }
 }
@@ -1498,7 +1502,7 @@ int32 FTypeDesc::GetSizePreDefinedKind(ETypeKind InKind)
     case ETypeKind::U_ScriptStruct: return 0;
     case ETypeKind::U_Class: return sizeof(UObject*);
     case ETypeKind::U_Function: return sizeof(UObject*);
-
+    case ETypeKind::U_Interface: return sizeof(FScriptInterface);
     default: return 0;
     }
 }
@@ -1535,7 +1539,14 @@ TRefCountPtr<FTypeDesc> FTypeDesc::AquireClassDescByUEType(UField* UEType)
         ETypeKind Kind = ETypeKind::None;
         if(UClass* Class = Cast<UClass>(UEType))
         {
-            Kind = ETypeKind::U_Class;
+            if(Class->HasAnyClassFlags(CLASS_Interface))
+            {
+                Kind = ETypeKind::U_Interface;
+            }
+            else
+            {
+                Kind = ETypeKind::U_Class;
+            }
         }
         if(UScriptStruct* ScriptStruct = Cast<UScriptStruct>(UEType))
         {
@@ -1549,6 +1560,7 @@ TRefCountPtr<FTypeDesc> FTypeDesc::AquireClassDescByUEType(UField* UEType)
         {
             Kind = ETypeKind::U_Function;
         }
+        
         if(Kind != ETypeKind::None)
         {
             auto&& Item = Container->Map.FindOrAdd(UEType);
@@ -1678,6 +1690,102 @@ TRefCountPtr<FTypeDesc> FTypeDesc::AquireClassDescByCombineKind(ETypeKind InKind
 	    }
     }
 
+    return nullptr;
+}
+
+TRefCountPtr<FTypeDesc> FTypeDesc::AquireClassDescByProperty(FProperty* Proy)
+{
+#define  PushProperty_GetTypedProp(PropType) F##PropType##Property* PropType##Property = CastField<F##PropType##Property>(Proy);
+    PushProperty_GetTypedProp(Bool);
+    PushProperty_GetTypedProp(Int8);
+    PushProperty_GetTypedProp(Int16);
+    PushProperty_GetTypedProp(Int);
+    PushProperty_GetTypedProp(Int64);
+    PushProperty_GetTypedProp(Byte);
+    PushProperty_GetTypedProp(UInt16);
+    PushProperty_GetTypedProp(UInt32);
+    PushProperty_GetTypedProp(UInt64);
+    PushProperty_GetTypedProp(Float);
+    PushProperty_GetTypedProp(Double);
+    PushProperty_GetTypedProp(Str);
+    PushProperty_GetTypedProp(Name);
+    PushProperty_GetTypedProp(Text);
+
+
+
+    PushProperty_GetTypedProp(Enum);
+    PushProperty_GetTypedProp(Struct);
+    PushProperty_GetTypedProp(Object);
+    PushProperty_GetTypedProp(Interface);
+
+    PushProperty_GetTypedProp(Delegate);
+    PushProperty_GetTypedProp(MulticastDelegate);
+
+    PushProperty_GetTypedProp(Array);
+    PushProperty_GetTypedProp(Set);
+    PushProperty_GetTypedProp(Map);
+
+#undef PushProperty_GetTypedProp
+
+#define PushProperty_BaseType(BaseType) if(BaseType##Property) {return AquireClassDescByPreDefinedKind(ETypeKind::BaseType);}
+    PushProperty_BaseType(Bool);
+    PushProperty_BaseType(Int8);
+    PushProperty_BaseType(Int16);
+    if (IntProperty) { return AquireClassDescByPreDefinedKind(ETypeKind::Int32); }
+    PushProperty_BaseType(Int64);
+    PushProperty_BaseType(Byte);
+    PushProperty_BaseType(UInt16);
+    PushProperty_BaseType(UInt32);
+    PushProperty_BaseType(UInt64);
+    PushProperty_BaseType(Float);
+    PushProperty_BaseType(Double);
+    if (StrProperty) { return AquireClassDescByPreDefinedKind(ETypeKind::String); }
+    PushProperty_BaseType(Name);
+    PushProperty_BaseType(Text);
+#undef PushProperty_BaseType
+
+    if(EnumProperty)
+    {
+        return AquireClassDescByUEType(EnumProperty->GetEnum());
+    }
+    if(StructProperty)
+    {
+        return AquireClassDescByUEType(StructProperty->Struct);
+    }
+    if(ObjectProperty)
+    {
+        return AquireClassDescByUEType(ObjectProperty->PropertyClass);
+    }
+    if(InterfaceProperty)
+    {
+        return AquireClassDescByUEType(InterfaceProperty->InterfaceClass);
+    }
+
+    if(ArrayProperty)
+    {
+        auto InnerProperty = AquireClassDescByProperty(ArrayProperty->Inner);
+        return AquireClassDescByCombineKind(ETypeKind::Array, { InnerProperty });
+    }
+    if (SetProperty)
+    {
+        auto InnerProperty = AquireClassDescByProperty(SetProperty->ElementProp);
+        return AquireClassDescByCombineKind(ETypeKind::Set, { InnerProperty });
+    }
+    if(MapProperty)
+    {
+        auto InnerProperty = AquireClassDescByProperty(MapProperty->KeyProp);
+        auto ValueProperty = AquireClassDescByProperty(MapProperty->ValueProp);
+        return AquireClassDescByCombineKind(ETypeKind::Map, { InnerProperty, ValueProperty });
+    }
+
+    if(DelegateProperty)
+    {
+        return AquireClassDescByCombineKind(ETypeKind::Delegate, { });
+    }
+    if (MulticastDelegateProperty)
+    {
+        return AquireClassDescByCombineKind(ETypeKind::MulticastDelegate, { });
+    }
     return nullptr;
 }
 
@@ -2028,6 +2136,18 @@ void ULuaState::PushUStructCopy(void* Value, UScriptStruct* DataType)
     //PushLuaUEData(Value, DataType, EUEDataType::Struct, nullptr);
 }
 
+void ULuaState::PushProperty(void* Value, FProperty* Proy)
+{
+    auto Type = FTypeDesc::AquireClassDescByProperty(Proy);
+    PushLuaUEValue(Value, Type);
+}
+
+void ULuaState::PushProperty(void* Value, const FLuaUEValue& PartOfWhom, FProperty* Proy)
+{
+    auto Type = FTypeDesc::AquireClassDescByProperty(Proy);
+    PushLuaUEValue(Value, PartOfWhom, Type);
+}
+
 const char* const ULuaState::LuaUEDataMetatableName = MAKE_LUA_METATABLE_NAME(FLuaUEData);
 const char* const ULuaState::LuaUEValueMetatableName = MAKE_LUA_METATABLE_NAME(FLuaUEValue);
 
@@ -2081,8 +2201,11 @@ int OnDestroyUEValueInLua(lua_State* L)
     if (ensure(strcmp(lua_tostring(L, -1), ULuaState::LuaUEValueMetatableName) == 0))
     {
         FLuaUEValue* LuaUEValue = (FLuaUEValue*)lua_touserdata(L, 1);
-        ensure(!LuaUEValue->IsHasValidData());
-        
+        ensure(!LuaUEValue->IsHasValidData() && LuaUEValue->AllValueIndex == -1);
+        if(LuaUEValue->AllValueIndex != -1)
+        {
+            ((ULuaState*)(G(L)->ud))->RemoveFormAllValues(LuaUEValue);
+        }
         LuaUEValue->~FLuaUEValue();
     }
     return 0;

@@ -24,6 +24,21 @@ namespace LuaCPPAPI
 }
 
 
+UINTERFACE(Blueprintable, MinimalAPI)
+class UTestInterface : public UInterface
+{
+public:
+	GENERATED_BODY()
+};
+
+class ITestInterface
+{
+public:
+	GENERATED_BODY()
+
+	virtual void T(){};
+
+};
 
 USTRUCT(BlueprintType)
 struct FDummyStruct
@@ -86,6 +101,7 @@ enum class ETypeKind : uint16
 	U_ScriptStruct,
 	U_Class,
 	U_Function,
+	U_Interface,
 	UserDefinedKindEnd
 	
 };
@@ -131,6 +147,8 @@ struct FTypeDesc : FRefCountBase
 	LUASOURCE_API static TRefCountPtr<FTypeDesc> AquireClassDescByUEType(UField* UEType);
 	LUASOURCE_API static TRefCountPtr<FTypeDesc> AquireClassDescByPreDefinedKind(ETypeKind InKind);
 	LUASOURCE_API static TRefCountPtr<FTypeDesc> AquireClassDescByCombineKind(ETypeKind InKind, const TArray<TRefCountPtr<FTypeDesc>>& InKey);
+
+	LUASOURCE_API static TRefCountPtr<FTypeDesc> AquireClassDescByProperty(FProperty* UEType);
 };
 
 typedef TRefCountPtr<FTypeDesc> FTypeDescRefCount;
@@ -599,6 +617,8 @@ class ULuaState : public UObject
 {
 	GENERATED_BODY()
 
+	friend int OnDestroyUEValueInLua(lua_State*);
+
 	void PostGarbageCollect();
 
 	friend void LuaLock(lua_State*);
@@ -638,6 +658,7 @@ class ULuaState : public UObject
 	{
 		AllValues[V->AllValueIndex] = nullptr;
 		UnusedAllValueIndex.Push(V->AllValueIndex);
+		V->AllValueIndex = -1;
 	}
 
 
@@ -645,7 +666,8 @@ class ULuaState : public UObject
 	LUASOURCE_API void PushLuaUEValue(void* Value, const FLuaUEValue& PartOfWhom, const TRefCountPtr<FTypeDesc>& Type);
 	LUASOURCE_API void PushUStructCopy(void* Value, UScriptStruct* DataType);
 
-
+	LUASOURCE_API void PushProperty(void* Value, FProperty* Proy);
+	LUASOURCE_API void PushProperty(void* Value, const FLuaUEValue& PartOfWhom, FProperty* Proy);
 	//LUASOURCE_API void PushLuaUEData(void* Value, UStruct* DataType, EUEDataType Type, TCustomMemoryHandle<FLuaUEData> Oter, int32 MaxCount = 1);
 	
 public:
@@ -679,22 +701,17 @@ public:
 	}
 	UFUNCTION(BlueprintCallable, CustomThunk, meta = (CustomStructureParam = "CustomStruct"))
 	void PushUStructCopy(const FDummyStruct& CustomStruct);
-	void implPushUStructCopy(void* const StructAddr, UScriptStruct* StructType)
-	{
-		PushUStructCopy(StructAddr, StructType);
-	}
 
 	DECLARE_FUNCTION(execPushUStructCopy)
 	{
 		Stack.MostRecentPropertyAddress = nullptr;
 		Stack.MostRecentProperty = nullptr;
-		Stack.StepCompiledIn<FStructProperty>(NULL);
+		Stack.StepCompiledIn<FProperty>(NULL);
 		void* StructAddr = Stack.MostRecentPropertyAddress;
-		FStructProperty* StructProperty = CastField<FStructProperty>(Stack.MostRecentProperty);
 
 		P_FINISH;
 		P_NATIVE_BEGIN;
-		((ULuaState*)P_THIS)->implPushUStructCopy(StructAddr, StructProperty->Struct);
+		((ULuaState*)P_THIS)->PushProperty(StructAddr, Stack.MostRecentProperty);
 		P_NATIVE_END;
 	}
 
