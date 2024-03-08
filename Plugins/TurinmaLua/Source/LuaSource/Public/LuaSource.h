@@ -24,6 +24,12 @@ namespace LuaCPPAPI
 }
 
 
+UENUM()
+enum class ETEnum : uint8
+{
+	Invalid = 0
+};
+
 UINTERFACE(Blueprintable, MinimalAPI)
 class UTestInterface : public UInterface
 {
@@ -94,12 +100,13 @@ enum class ETypeKind : uint16
 	Delegate,
 	MulticastDelegate,
 	WeakObject,
+	Enum,
 	CombineKindEnd,
 
 
 	UserDefinedKindBegin = CombineKindEnd,
-	U_Enum = UserDefinedKindBegin,
-	U_ScriptStruct,
+	 U_Enum = UserDefinedKindBegin,
+	 U_ScriptStruct,
 	U_Class,
 	U_Function,
 	U_Interface,
@@ -143,6 +150,7 @@ struct FTypeDesc : FRefCountBase
 	LUASOURCE_API uint32 GetTypeHash(void* ValueAddress) const;
 	LUASOURCE_API bool ValueEqual(void* Dest, void* Source) const;
 
+	LUASOURCE_API int ToLuaValue(lua_State* L, void* ValueAddress) const; //lua stakc -0 +1
 
 	LUASOURCE_API static int32 GetSizePreDefinedKind(ETypeKind InKind);
 	LUASOURCE_API static TRefCountPtr<FTypeDesc> AquireClassDescByUEType(UField* UEType);
@@ -569,6 +577,9 @@ public:
 	TArray<FTestStruct> StructArray;
 	UPROPERTY()
 	UObject* OO[10];
+
+	UPROPERTY()
+	ETEnum TTe;
 
 	UFUNCTION(CallInEditor)
 	void ConstructObjectTest()
