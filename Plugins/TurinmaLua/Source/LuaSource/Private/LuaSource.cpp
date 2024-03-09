@@ -902,6 +902,7 @@ int32 FTypeDesc::GetSize() const
     switch(Kind)
     {
     case ETypeKind::U_ScriptStruct: return UserDefinedTypePointer.U_ScriptStruct ? UserDefinedTypePointer.U_ScriptStruct->GetStructureSize() : 0;
+    case ETypeKind::Enum: return CombineKindSubTypes[1] ? CombineKindSubTypes[1]->GetSize() : sizeof(uint64);
     default: return GetSizePreDefinedKind(Kind);
     }
 }
@@ -1744,6 +1745,11 @@ TRefCountPtr<FTypeDesc> FTypeDesc::AquireClassDescByPreDefinedKind(ETypeKind InK
     {
         static TMap<ETypeKind, FTypeDescRefCount> Map;
         auto&& Item = Map.FindOrAdd(InKind);
+        if(!Item)
+        {
+            Item = new FTypeDesc();
+        }
+        check(Item->Kind == ETypeKind::None || Item->Kind == InKind)
         if(Item->Kind == ETypeKind::None)
         {
             Item->Kind = InKind;
@@ -1961,22 +1967,7 @@ TRefCountPtr<FTypeDesc> FTypeDesc::AquireClassDescByProperty(FProperty* Proy)
         TRefCountPtr<FTypeDesc> D = nullptr;
         if(Under)
         {
-            if (Under->ElementSize == 1)
-            {
-                D = AquireClassDescByPreDefinedKind(ETypeKind::Byte);
-            }
-            else if (Under->ElementSize == 2)
-            {
-                D = AquireClassDescByPreDefinedKind(ETypeKind::UInt16);
-            }
-            else if (Under->ElementSize == 4)
-            {
-                D = AquireClassDescByPreDefinedKind(ETypeKind::UInt32);
-            }
-            else if (Under->ElementSize == 8)
-            {
-                D = AquireClassDescByPreDefinedKind(ETypeKind::UInt64);
-            }
+            D = AquireClassDescByProperty(Under);
         }
         auto Inner = AquireClassDescByUEType(EnumProperty->GetEnum());
         return AquireClassDescByCombineKind(ETypeKind::Enum, { Inner, D });

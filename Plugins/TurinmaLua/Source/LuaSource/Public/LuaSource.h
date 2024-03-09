@@ -24,10 +24,12 @@ namespace LuaCPPAPI
 }
 
 
-UENUM()
+UENUM(BlueprintType)
 enum class ETEnum : uint8
 {
-	Invalid = 0
+	Invalid = 0,
+	Test1,
+	Test2,
 };
 
 UINTERFACE(Blueprintable, MinimalAPI)
@@ -726,6 +728,24 @@ public:
 		((ULuaState*)P_THIS)->PushProperty(StructAddr, Stack.MostRecentProperty);
 		P_NATIVE_END;
 	}
+
+	UFUNCTION(BlueprintCallable, CustomThunk, meta = (ArrayParm = "CustomArray"))
+	void PushArrayCopy(const TArray<int>& CustomArray);
+
+	DECLARE_FUNCTION(execPushArrayCopy)
+	{
+		Stack.MostRecentPropertyAddress = nullptr;
+		Stack.MostRecentProperty = nullptr;
+		Stack.StepCompiledIn<FArrayProperty>(NULL);
+		void* StructAddr = Stack.MostRecentPropertyAddress;
+
+		P_FINISH;
+		P_NATIVE_BEGIN;
+		((ULuaState*)P_THIS)->PushProperty(StructAddr, Stack.MostRecentProperty);
+		P_NATIVE_END;
+	}
+
+
 
 
 	template<typename T>
