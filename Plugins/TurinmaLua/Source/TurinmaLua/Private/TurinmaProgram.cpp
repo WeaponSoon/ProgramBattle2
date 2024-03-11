@@ -1,5 +1,7 @@
 #include "TurinmaProgram.h"
 
+#include <coroutine>
+
 uint32 FTurinmaValue::GetHash() const
 {
 	uint32 Hash = GetTypeHash(ValueType);
@@ -158,4 +160,75 @@ int64 FTurinmaGraphNodeBase::StaticTypeId()
 	return Inner;
 }
 
+FTurinmaGraphNodeBase* FTurinmaGraphNodeDataTest::CreateNode()
+{
+	return new FTurinmaGraphNodeTest();
+}
+
 DEFINE_TURINMA_GRAPH_NODE(FTurinmaGraphNodeTest)
+
+UE_DISABLE_OPTIMIZATION
+
+
+struct HelloCoroutine {
+	struct HelloPromise {
+		HelloCoroutine get_return_object() {
+			return std::coroutine_handle<HelloPromise>::from_promise(*this);
+		}
+		std::suspend_always initial_suspend() { return {}; }//协程创建之后，协程函数体执行之前的时候执行此函数，等同于co_await initial_suspend();这里返回suspend_always
+																//表示创建调用函数创建协程对象后立马返回，不执行协程函数真正的函数体，知道外面调用resume
+		std::suspend_never final_suspend() noexcept
+		{
+			UE_LOG(LogTemp, Log, TEXT("SWP :: Suspend"));
+			return {};
+		}//协程函数体执行全部完成之后执行此函数，等同于co_await final_suspend();
+
+		// 协程函数要返回某种类型的值的话（即co_return XXX），
+		// 需要在promise里声明void return_value(类型 value)函数。
+		// 注意这里才是接受协程函数逻辑上的返回值的地方，协程函数的声名中总是返回promise对象
+		/*void return_value(int value) {
+			UE_LOG(LogTemp, Log, TEXT("SWP :: Return"));
+		}*/
+
+		// 协程函数不需要返回值的话（即co_return或不写等协程函数自然结束），需要在promise里声明void return_void()函数。
+		void return_void() {
+			UE_LOG(LogTemp, Log, TEXT("SWP :: Finish Void"));
+		}
+		void unhandled_exception() {}
+	};
+
+	using promise_type = HelloPromise;
+	HelloCoroutine(std::coroutine_handle<HelloPromise> h) : handle(h) {}
+
+	std::coroutine_handle<HelloPromise> handle;
+};
+
+
+HelloCoroutine hello() {
+	UE_LOG(LogTemp, Log, TEXT("SWP :: Hello"));
+	co_await std::suspend_always{};
+	UE_LOG(LogTemp, Log, TEXT("SWP :: World"));
+
+	//co_return 20;
+}
+
+
+FTestClass::FTestClass()
+{
+	//auto&& R = hello();
+	//UE_LOG(LogTemp, Log, TEXT("SWP :: BeforeExecute"));
+	//R.handle.resume();
+	//UE_LOG(LogTemp, Log, TEXT("SWP :: Resume"));
+	//R.handle.resume();
+
+	//FTurinmaGraphNodeBase Base;
+	//FTurinmaGraphNodeTest Test;
+
+	//FTurinmaGraphNodeTest* pR = Base.GetTyped<FTurinmaGraphNodeTest>();
+	//FTurinmaGraphNodeTest* pR1 = Test.GetTyped<FTurinmaGraphNodeTest>();
+
+}
+UE_ENABLE_OPTIMIZATION
+
+
+FTestClass FTestClass::TestFFFFF;
