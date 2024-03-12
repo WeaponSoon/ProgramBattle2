@@ -41,6 +41,7 @@ uint32 FTurinmaValue::GetHash() const
 	case ETurinmaValueType::Array: 
 	case ETurinmaValueType::Table: 
 	case ETurinmaValueType::Function:
+	case ETurinmaValueType::Struct:
 		if(HeapValue)
 		{
 			Hash = HashCombine(Hash, HeapValue->GetHash());
@@ -88,6 +89,7 @@ bool FTurinmaValue::Equals(const FTurinmaValue& Other) const
 		case ETurinmaValueType::Array:
 		case ETurinmaValueType::Table:
 		case ETurinmaValueType::Function:
+		case ETurinmaValueType::Struct:
 			if (HeapValue)
 			{
 				bRet = HeapValue->Equals(*Other.HeapValue);
@@ -148,6 +150,59 @@ bool FTurinmaTableValue::Equals(const FTurinmaHeapValue& Other) const
 	return this == &Other;
 }
 
+uint32 FTurinmaStructValue::GetHash() const
+{
+	uint32 Hash = GetTypeHash(ProtoName);
+	for(auto&& Item : Fields)
+	{
+		Hash = HashCombine(Hash, GetTypeHash(Item.first));
+		Hash = HashCombine(Hash, Item.second.GetHash());
+	}
+
+	return Hash;
+}
+
+bool FTurinmaStructValue::Equals(const FTurinmaHeapValue& Other) const
+{
+	if (this == &Other)
+	{
+		return true;
+	}
+	auto* TypedOther = Other.GetTyped<FTurinmaStructValue>();
+	if(!TypedOther)
+	{
+		return false;
+	}
+
+	if(ProtoName != TypedOther->ProtoName)
+	{
+		return false;
+	}
+
+	if(Fields.size() != TypedOther->Fields.size())
+	{
+		return false;
+	}
+
+	for(auto&& Item : Fields)
+	{
+		auto&& OtherIter = TypedOther->Fields.find(Item.first);
+		if(OtherIter != TypedOther->Fields.end())
+		{
+			if(!OtherIter->second.Equals(Item.second))
+			{
+				return false;
+			}
+		}
+		else
+		{
+			return false;
+		}
+	}
+
+	return true;
+}
+
 int64 FTurinmaGraphNodeBase::GraphNodeTypeId()
 {
 	static int64 Inner = 0;
@@ -160,12 +215,23 @@ int64 FTurinmaGraphNodeBase::StaticTypeId()
 	return Inner;
 }
 
-FTurinmaGraphNodeBase* FTurinmaGraphNodeDataTest::CreateNode()
+TSharedPtr<struct FTurinmaGraphNodeBase> FTurinmaGraphNodeDataTest::CreateNode(const FTurinmaNodeCreateInfo& CreateInfo)
 {
-	return new FTurinmaGraphNodeTest();
+	auto S = MakeShared<FTurinmaGraphNodeTest>();
+	S->DataIndex = CreateInfo.DataIndex;
+	return S;
 }
 
 DEFINE_TURINMA_GRAPH_NODE(FTurinmaGraphNodeTest)
+
+TSharedPtr<struct FTurinmaGraphNodeBase> FTurinmaGraphInputNodeData::CreateNode(const FTurinmaNodeCreateInfo& CreateInfo)
+{
+	auto S = MakeShared<FTurinmaGraphInputNode>();
+	S->DataIndex = CreateInfo.DataIndex;
+	return S;
+}
+
+DEFINE_TURINMA_GRAPH_NODE(FTurinmaGraphInputNode)
 
 UE_DISABLE_OPTIMIZATION
 
@@ -212,6 +278,48 @@ HelloCoroutine hello() {
 	//co_return 20;
 }
 
+
+void FTurinmaGraph::InitWithDataAndInfo(const FTurinmaGraphData& InData, const FTurinmaGraphCreateInfo& InInfo)
+{
+	DataIndex = InInfo.DataIndex;
+	for(int NodeDataIndx = 0; NodeDataIndx < InData.NodeDatas.Num(); ++NodeDataIndx)
+	{
+		auto&& Item = InData.NodeDatas[NodeDataIndx];
+		Nodes.Add(Item.NodeData->CreateNode({ NodeDataIndx }));
+	}
+}
+
+void FTurinmaProcess::Execute()
+{
+	if(CallInfos.IsValidIndex(CurCallInfo))
+	{
+		auto&& CallInfo = CallInfos[CurCallInfo];
+		auto&& CallItem = CallInfo.CallStack.Last();
+		auto&& NodeItem = CallItem.LocalNodeIndex.Last();
+		auto&& Node = CallItem.Graph->Nodes[NodeItem.NodeIndex];
+		auto&& NodeData = Program->GraphDatas[CallItem.Graph->DataIndex].NodeDatas[NodeItem.NodeIndex];
+
+		if(NodeItem.NodeInput.Num() == 0 && NodeData.NodeData->InputParams.Num() != 0)
+		{
+			//todo peek param;
+			for(auto&& InputParam : NodeData.NodeData->InputParams)
+			{
+				
+			}
+			
+		}
+		else if(NodeItem.NodeInput.Num() == NodeData.NodeData->InputParams.Num())
+		{
+			//todo execute
+		}
+		else
+		{
+			//todo error
+		}
+
+	}
+
+}
 
 FTestClass::FTestClass()
 {

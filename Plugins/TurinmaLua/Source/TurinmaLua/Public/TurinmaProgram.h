@@ -1,8 +1,10 @@
 #pragma once
 
+#include <map>
 #include "CoreMinimal.h"
 #include "Engine/DataAsset.h"
 #include "TurinmaProgram.generated.h"
+
 
 enum class ETurinmaValueType : uint8
 {
@@ -20,7 +22,8 @@ enum class ETurinmaValueType : uint8
 
 	Array,
 	Table,
-	Function
+	Function,
+	Struct
 };
 
 struct FTurinmaValue
@@ -61,7 +64,8 @@ enum class EHeapValueKind
 	None,
 	Function,
 	Array,
-	Table
+	Table,
+	Struct
 };
 
 struct FTurinmaHeapValue : TSharedFromThis<FTurinmaHeapValue>
@@ -137,6 +141,37 @@ struct FTurinmaTableValue : FTurinmaHeapValue
 	virtual bool Equals(const FTurinmaHeapValue& Other) const override;
 };
 
+struct FNameFastCompaire
+{
+	bool operator()(const FName& A, const FName& B) const noexcept
+	{
+		return A.FastLess(B);
+	}
+};
+
+
+struct FNameStableCompaire
+{
+	bool operator()(const FName& A, const FName& B) const noexcept
+	{
+		return A.LexicalLess(B);
+	}
+};
+
+struct FTurinmaStructValue : FTurinmaHeapValue
+{
+	FName ProtoName;
+
+	std::map<FName, FTurinmaValue, FNameFastCompaire> Fields;
+
+	virtual EHeapValueKind GetHeapValueKind() const override { return EHeapValueKind::Struct; }
+
+	static EHeapValueKind StaticHeapValueKind() { return EHeapValueKind::Struct; }
+
+	virtual uint32 GetHash() const override;
+	virtual bool Equals(const FTurinmaHeapValue& Other) const override;
+};
+
 
 
 #define DECLARE_TURINMA_GRAPH_NODE_DATA(DataType)\
@@ -149,16 +184,95 @@ struct FTurinmaTableValue : FTurinmaHeapValue
 		return (void*)this;\
 	}
 
-USTRUCT(BlueprintTYpe)
+USTRUCT(BlueprintType)
+struct FTurinmaGraphNodeLinkInfo
+{
+	GENERATED_BODY()
+
+	UPROPERTY(VisibleAnywhere)
+	int32 NextNode = -1;
+};
+
+USTRUCT(BlueprintType)
+struct FTurinmaGraphNodeParamLinkInfo
+{
+	GENERATED_BODY()
+
+	UPROPERTY(VisibleAnywhere)
+	int32 ParamNode = -1;
+
+	UPROPERTY(VisibleAnywhere)
+	int32 ParamPin = -1;
+};
+
+USTRUCT()
+struct FTurinmaGraphNodeParamDescInfo
+{
+	GENERATED_BODY()
+
+	enum class FTurinmaGraphParamDescVersion : uint16
+	{
+		First,
+
+		Max,
+		Last = Max - 1
+	};
+	FTurinmaGraphParamDescVersion Version;
+	ETurinmaValueType ValueType;
+	FName ExtraTypeInfo;
+
+
+	bool Serialize(FArchive& Ar)
+	{
+		if (Ar.IsSaving())
+		{
+			FTurinmaGraphParamDescVersion CurV = FTurinmaGraphParamDescVersion::Last;
+			Ar << CurV;
+
+			Ar << ValueType;
+			Ar << ExtraTypeInfo;
+		}
+		if (Ar.IsLoading())
+		{
+			Ar << Version;
+
+			Ar << ValueType;
+			Ar << ExtraTypeInfo;
+		}
+		return true;
+	}
+};
+
+
+template<> struct TStructOpsTypeTraits<FTurinmaGraphNodeParamDescInfo> : public TStructOpsTypeTraitsBase2<FTurinmaGraphNodeParamDescInfo>
+{
+	enum { WithSerializer = true, };
+};
+
+
+struct FTurinmaNodeCreateInfo
+{
+	int32 DataIndex = INDEX_NONE;
+};
+
+USTRUCT(BlueprintType)
 struct TURINMALUA_API FTurinmaGraphNodeDataBase
 {
 	GENERATED_BODY()
 
 
 	UPROPERTY(EditAnywhere)
+	bool IsPure = false;
+	UPROPERTY(EditAnywhere)
 	FVector2D Location;
 	UPROPERTY(VisibleAnywhere)
-	TArray<int32> NextNodes;
+	TArray<FTurinmaGraphNodeLinkInfo> NextNodes;
+	UPROPERTY(VisibleAnywhere)
+	TArray<FTurinmaGraphNodeParamLinkInfo> InputParams;
+	UPROPERTY(VisibleAnywhere)
+	TArray<FTurinmaGraphNodeParamDescInfo> OutputParams;
+
+
 
 	template<typename T>
 	T* GetTyped()
@@ -194,16 +308,12 @@ struct TURINMALUA_API FTurinmaGraphNodeDataBase
 		return (void*)this;
 	}
 
-	virtual void AddReferencedObjects(FReferenceCollector& Collector)
-	{
-		Collector.AddPropertyReferences(GetDataType(), GetThisPtr());
-	}
+	virtual TSharedPtr<struct FTurinmaGraphNodeBase> CreateNode(const FTurinmaNodeCreateInfo& CreatInfo) { return nullptr; }
 
-	virtual struct FTurinmaGraphNodeBase* CreateNode() { return nullptr; }
+	virtual FName GetNodeName() const { return NAME_None; }
 
 	virtual ~FTurinmaGraphNodeDataBase() = default;
 };
-
 
 
 #define DECLARE_TURINMA_GRAPH_NODE(NodeType)\
@@ -231,8 +341,10 @@ struct TURINMALUA_API FTurinmaGraphNodeBase : TSharedFromThis<FTurinmaGraphNodeB
 protected:
 	FORCENOINLINE static int64 GraphNodeTypeId();
 public:
-	FVector2D Position;
-	TWeakPtr<FTurinmaGraphNodeBase> Next;
+
+	int32 DataIndex = INDEX_NONE;
+
+	
 public:
 	template<typename T>
 	T* GetTyped()
@@ -286,7 +398,7 @@ struct FTurinmaGraphNodeDataTest : public FTurinmaGraphNodeDataBase
 
 	DECLARE_TURINMA_GRAPH_NODE_DATA(FTurinmaGraphNodeDataTest)
 
-	virtual FTurinmaGraphNodeBase* CreateNode() override;
+	virtual TSharedPtr<struct FTurinmaGraphNodeBase> CreateNode(const FTurinmaNodeCreateInfo& CreateInfo) override;
 	
 };
 
@@ -296,12 +408,29 @@ struct FTurinmaGraphNodeTest : FTurinmaGraphNodeBase
 };
 
 
+USTRUCT()
+struct FTurinmaGraphInputNodeData : public FTurinmaGraphNodeDataBase
+{
+	GENERATED_BODY()
+
+	DECLARE_TURINMA_GRAPH_NODE_DATA(FTurinmaGraphInputNodeData)
+
+	virtual TSharedPtr<struct FTurinmaGraphNodeBase> CreateNode(const FTurinmaNodeCreateInfo& CreateInfo) override;
+};
+
+
+struct FTurinmaGraphInputNode : FTurinmaGraphNodeBase
+{
+	DECLARE_TURINMA_GRAPH_NODE(FTurinmaGraphInputNode)
+};
+
+
 USTRUCT(BlueprintType)
 struct TURINMALUA_API FTurinmaGraphData
 {
 	GENERATED_BODY()
 
-		enum class FTurinmaGraphDataVersion : uint16
+	enum class FTurinmaGraphDataVersion : uint16
 	{
 		First,
 
@@ -321,7 +450,6 @@ struct TURINMALUA_API FTurinmaGraphData
 		};
 
 		FTurinmaNodeDataItemVersion Version = FTurinmaNodeDataItemVersion::Last;
-		FName NodeName;
 		UScriptStruct* NodeType = nullptr;
 		FTurinmaGraphNodeDataBase* NodeData = nullptr;
 
@@ -345,7 +473,6 @@ struct TURINMALUA_API FTurinmaGraphData
 				FTurinmaNodeDataItemVersion CurV = FTurinmaNodeDataItemVersion::Last;
 				Ar << CurV;
 
-				Ar << NodeName;
 				Ar << NodeType;
 				if(NodeType)
 				{
@@ -360,7 +487,6 @@ struct TURINMALUA_API FTurinmaGraphData
 			{
 				Ar << Version;
 
-				Ar << NodeName;
 				Ar << NodeType;
 				if (NodeType)
 				{
@@ -407,9 +533,9 @@ struct TURINMALUA_API FTurinmaGraphData
 		return true;
 	}
 
-	void AddReferencedObjects(FReferenceCollector& Collector)
+	void AddStructReferencedObjects(class FReferenceCollector& Collector)
 	{
-		for(auto&& Item : NodeDatas)
+		for (auto&& Item : NodeDatas)
 		{
 			Item.AddReferencedObjects(Collector);
 		}
@@ -419,13 +545,21 @@ struct TURINMALUA_API FTurinmaGraphData
 
 template<> struct TStructOpsTypeTraits<FTurinmaGraphData> : public TStructOpsTypeTraitsBase2<FTurinmaGraphData>
 {
-	enum { WithSerializer = true };
+	enum { WithSerializer = true, WithAddStructReferencedObjects = true };
 };
 
+struct FTurinmaGraphCreateInfo
+{
+	int32 DataIndex = INDEX_NONE;
+};
 
 struct FTurinmaGraph
 {
-	
+	int32 DataIndex = INDEX_NONE;
+
+	TArray<TSharedPtr<FTurinmaGraphNodeBase>> Nodes;
+
+	void InitWithDataAndInfo(const FTurinmaGraphData& InData, const FTurinmaGraphCreateInfo& InInfo);
 };
 
 
@@ -435,9 +569,54 @@ class TURINMALUA_API UTurinmaProgram : public UDataAsset
 {
 	GENERATED_BODY()
 
+public:
+	UPROPERTY()
+	TArray<FTurinmaGraphData> GraphDatas;
 
+};
 
+struct FTurinmaProcessHeap
+{
+	TArray<TSharedPtr<FTurinmaHeapValue>> TurinmaHeap;
+};
+struct FTurinmaProcessGlobal
+{
+	TMap<FName, TSharedPtr<FTurinmaHeapValue>>  TurinmaGlobals;
+};
 
+struct FTurinmaProcessCallInfoItem
+{
+	struct FLocalNodeIndex
+	{
+		int32 NodeIndex = INDEX_NONE;
+		TArray<FTurinmaValue> NodeInput;
+		TArray<FTurinmaValue> NodeOutput;
+	};
+
+	FTurinmaGraph* Graph = nullptr;
+	TArray<FLocalNodeIndex> LocalNodeIndex;
+	TMap<FName, FTurinmaValue> LocalVariables;
+	TArray<FTurinmaValue> TempLocalVariables;
+};
+//a call info mean a thread
+struct FTurinmaProcessCallInfo
+{
+	TArray<FTurinmaProcessCallInfoItem> CallStack;
+};
+
+class TURINMALUA_API FTurinmaProcess : public UDataAsset
+{
+	TWeakObjectPtr<UTurinmaProgram> Program;
+	FTurinmaProcessHeap Heap;
+	FTurinmaProcessGlobal Globals;
+	TIndirectArray<FTurinmaGraph> Graphs;
+	TIndirectArray<FTurinmaProcessCallInfo> CallInfos;
+
+	int32 CurCallInfo = INDEX_NONE;
+
+	int32 NextCallInfo = INDEX_NONE;
+
+	void Execute();
 };
 
 

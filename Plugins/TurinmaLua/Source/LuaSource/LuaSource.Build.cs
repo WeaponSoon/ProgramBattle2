@@ -10,6 +10,7 @@ public class LuaSource : ModuleRules
 		PCHUsage = ModuleRules.PCHUsageMode.UseExplicitOrSharedPCHs;
 
 		PublicDefinitions.Add("LUA_IN_UE=1");
+		PublicDefinitions.Add("KF_IN_UE=1");
 
 		PublicIncludePaths.AddRange(
 			new string[] {

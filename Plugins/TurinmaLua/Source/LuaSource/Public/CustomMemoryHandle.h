@@ -9,7 +9,7 @@
 
 
 #ifdef KF_IN_UE
-#include "AssertionMacros.h"
+#include "CoreMinimal.h"
 #else
 #ifndef check
 #define check(expr)
@@ -21,7 +21,6 @@
 #ifdef KF_IN_UE
 #if KF_IN_UE
 #include "CoreMinimal.h"
-#include "AssertionMacros.h"
 #else
 #define QUICK_SCOPE_CYCLE_COUNTER(Stat)
 #define checkf(Exp, Msg, ...)
