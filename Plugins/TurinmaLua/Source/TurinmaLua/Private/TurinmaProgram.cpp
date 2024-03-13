@@ -487,7 +487,7 @@ FTurinmaCoroutine FTurinmaProcess::Execute()
 										RecordError(FTurinmaErrorContent());
 										break;
 									}
-
+									CallItem.LocalNodeIndex.RemoveAt(CallItem.LocalNodeIndex.Num() - 1);
 									LocalJmp(CallItem, NextNode.NextNode);
 									break;
 								}
@@ -502,6 +502,11 @@ FTurinmaCoroutine FTurinmaProcess::Execute()
 								RecordError(FTurinmaErrorContent());
 								break;
 							}
+						}
+						else
+						{
+							CallItem.LocalNodeIndex.RemoveAt(CallItem.LocalNodeIndex.Num() - 1);
+							//todo finish whole graph
 						}
 					};
 						break;
