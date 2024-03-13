@@ -1,5 +1,6 @@
 #pragma once
 
+#include <coroutine>
 #include <map>
 #include "CoreMinimal.h"
 #include "Engine/DataAsset.h"
@@ -336,6 +337,14 @@ struct TURINMALUA_API FTurinmaGraphNodeDataBase
 	}
 
 
+struct FTurinmaNodeExecuteParam
+{
+	class FTurinmaProcess* Process = nullptr;
+	int32 CurCallInfo = INDEX_NONE;
+	int32 CurCallItem = INDEX_NONE;
+	int32 MyIndex = INDEX_NONE;
+};
+
 struct TURINMALUA_API FTurinmaGraphNodeBase : TSharedFromThis<FTurinmaGraphNodeBase>
 {
 protected:
@@ -386,6 +395,7 @@ public:
 		return TEXT("FTurinmaGraphNodeBase");
 	}
 
+	virtual bool Execute(const FTurinmaNodeExecuteParam& ExecuteParam) { return true; }
 
 	virtual ~FTurinmaGraphNodeBase() = default;
 };
@@ -559,6 +569,9 @@ struct FTurinmaGraph
 
 	TArray<TSharedPtr<FTurinmaGraphNodeBase>> Nodes;
 
+	
+
+
 	void InitWithDataAndInfo(const FTurinmaGraphData& InData, const FTurinmaGraphCreateInfo& InInfo);
 };
 
@@ -588,15 +601,27 @@ struct FTurinmaProcessCallInfoItem
 {
 	struct FLocalNodeIndex
 	{
+		enum class ELocalNodeIndexStatus
+		{
+			None,
+			PeekingParams,
+			Executing,
+			PushingResult,
+			Finish
+		};
+		ELocalNodeIndexStatus Status = ELocalNodeIndexStatus::None;
 		int32 NodeIndex = INDEX_NONE;
 		TArray<FTurinmaValue> NodeInput;
 		TArray<FTurinmaValue> NodeOutput;
+		int32 WhichNextToGo = INDEX_NONE;
 	};
-
-	FTurinmaGraph* Graph = nullptr;
+	int32 GraphIndex = INDEX_NONE;
+	//FTurinmaGraph* Graph = nullptr;
 	TArray<FLocalNodeIndex> LocalNodeIndex;
 	TMap<FName, FTurinmaValue> LocalVariables;
-	TArray<FTurinmaValue> TempLocalVariables;
+	TMap<int32, TArray<FTurinmaValue>> TempLocalVariables;
+
+
 };
 //a call info mean a thread
 struct FTurinmaProcessCallInfo
@@ -604,7 +629,55 @@ struct FTurinmaProcessCallInfo
 	TArray<FTurinmaProcessCallInfoItem> CallStack;
 };
 
-class TURINMALUA_API FTurinmaProcess : public UDataAsset
+struct FTurinmaErrorContent
+{
+	
+};
+struct FTurinmaErrorInfo
+{
+	bool bError = false;
+	FTurinmaErrorContent Content;
+};
+
+
+
+struct FTurinmaCoroutine {
+	struct FTurinmaPromise {
+		FTurinmaCoroutine get_return_object() {
+			return std::coroutine_handle<FTurinmaPromise>::from_promise(*this);
+		}
+		std::suspend_always initial_suspend() { return {}; }//协程创建之后，协程函数体执行之前的时候执行此函数，等同于co_await initial_suspend();这里返回suspend_always
+		//表示创建调用函数创建协程对象后立马返回，不执行协程函数真正的函数体，知道外面调用resume
+		std::suspend_never final_suspend() noexcept
+		{
+			UE_LOG(LogTemp, Log, TEXT("SWP :: Suspend"));
+			return {};
+		}//协程函数体执行全部完成之后执行此函数，等同于co_await final_suspend();
+
+		// 协程函数要返回某种类型的值的话（即co_return XXX），
+		// 需要在promise里声明void return_value(类型 value)函数。
+		// 注意这里才是接受协程函数逻辑上的返回值的地方，协程函数的声名中总是返回promise对象
+		/*void return_value(int value) {
+			UE_LOG(LogTemp, Log, TEXT("SWP :: Return"));
+		}*/
+
+		// 协程函数不需要返回值的话（即co_return或不写等协程函数自然结束），需要在promise里声明void return_void()函数。
+		void return_void() {
+			UE_LOG(LogTemp, Log, TEXT("SWP :: Finish Void"));
+		}
+		void unhandled_exception() {}
+	};
+
+	using promise_type = FTurinmaPromise;
+	FTurinmaCoroutine(std::coroutine_handle<FTurinmaPromise> h) : handle(h) {}
+
+	std::coroutine_handle<FTurinmaPromise> handle;
+};
+
+
+
+
+class TURINMALUA_API FTurinmaProcess
 {
 	TWeakObjectPtr<UTurinmaProgram> Program;
 	FTurinmaProcessHeap Heap;
@@ -612,11 +685,22 @@ class TURINMALUA_API FTurinmaProcess : public UDataAsset
 	TIndirectArray<FTurinmaGraph> Graphs;
 	TIndirectArray<FTurinmaProcessCallInfo> CallInfos;
 
+	bool bShouldExit = false;
+
+	FTurinmaErrorInfo ErrorInfo;
+
 	int32 CurCallInfo = INDEX_NONE;
 
 	int32 NextCallInfo = INDEX_NONE;
 
-	void Execute();
+	bool IsGraphValid(int32 GraphIndex);
+	bool IsNodeValid(int32 GraphIndex, int32 NodeIndex);
+	bool IsNodePure(int32 GraphIndex, int32 NodeIndex);
+	bool LocalJmp(FTurinmaProcessCallInfoItem& Item, int32 NodeIndex);
+
+	void RecordError(const FTurinmaErrorContent& InErrorContent);
+
+	FTurinmaCoroutine Execute();
 };
 
 
