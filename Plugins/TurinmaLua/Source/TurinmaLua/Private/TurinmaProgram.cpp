@@ -219,6 +219,7 @@ TSharedPtr<struct FTurinmaGraphNodeBase> FTurinmaGraphNodeDataTest::CreateNode(c
 {
 	auto S = MakeShared<FTurinmaGraphNodeTest>();
 	S->DataIndex = CreateInfo.DataIndex;
+	S->NodeIndex = CreateInfo.NodeIndex;
 	return S;
 }
 
@@ -228,10 +229,37 @@ TSharedPtr<struct FTurinmaGraphNodeBase> FTurinmaGraphInputNodeData::CreateNode(
 {
 	auto S = MakeShared<FTurinmaGraphInputNode>();
 	S->DataIndex = CreateInfo.DataIndex;
+	S->NodeIndex = CreateInfo.NodeIndex;
 	return S;
 }
 
 DEFINE_TURINMA_GRAPH_NODE(FTurinmaGraphInputNode)
+
+bool FTurinmaGraphInputNode::Execute(const FTurinmaNodeExecuteParam& ExecuteParam)
+{
+	auto&& CallItem = ExecuteParam.Process->CallInfos[ExecuteParam.CurCallInfo].CallStack[ExecuteParam.CurCallItem];
+	auto&& NodeItem = CallItem.LocalNodeIndex[ExecuteParam.MyIndex];
+	NodeItem.NodeOutput = CallItem.GraphInputValue;
+	return true;
+}
+
+TSharedPtr<FTurinmaGraphNodeBase> FTurinmaGraphOutputNodeData::CreateNode(const FTurinmaNodeCreateInfo& CreateInfo)
+{
+	auto S = MakeShared<FTurinmaGraphOutputNode>();
+	S->DataIndex = CreateInfo.DataIndex;
+	S->NodeIndex = CreateInfo.NodeIndex;
+	return S;
+}
+
+DEFINE_TURINMA_GRAPH_NODE(FTurinmaGraphOutputNode)
+
+bool FTurinmaGraphOutputNode::Execute(const FTurinmaNodeExecuteParam& ExecuteParam)
+{
+	auto&& CallItem = ExecuteParam.Process->CallInfos[ExecuteParam.CurCallInfo].CallStack[ExecuteParam.CurCallItem];
+	auto&& NodeItem = CallItem.LocalNodeIndex[ExecuteParam.MyIndex];
+	CallItem.GraphOutputValue = NodeItem.NodeInput;
+	return true;
+}
 
 UE_DISABLE_OPTIMIZATION
 
@@ -286,7 +314,8 @@ void FTurinmaGraph::InitWithDataAndInfo(const FTurinmaGraphData& InData, const F
 	for(int NodeDataIndx = 0; NodeDataIndx < InData.NodeDatas.Num(); ++NodeDataIndx)
 	{
 		auto&& Item = InData.NodeDatas[NodeDataIndx];
-		Nodes.Add(Item.NodeData->CreateNode({ NodeDataIndx }));
+		int32 NodeIndx = Nodes.Num();
+		Nodes.Add(Item.NodeData->CreateNode({ NodeDataIndx , NodeIndx}));
 	}
 }
 
@@ -299,6 +328,55 @@ void FTurinmaGraph::InitWithDataAndInfo(const FTurinmaGraphData& InData, const F
 //	}
 //	return false;
 //}
+
+std::suspend_never FTurinmaCoroutine::FTurinmaPromise::final_suspend() noexcept
+{
+	UE_LOG(LogTemp, Log, TEXT("SWP :: Suspend"));
+	Process->bHasFinish = true;
+	Process = nullptr;
+	return {};
+}
+
+bool FTurinmaProcess::Start()
+{
+	if(bHasStart)
+	{
+		return false;
+	}
+	if(Program.IsValid())
+	{
+		//todo init process by program
+		Coroutine = Execute();
+		Coroutine.handle.promise().Process = this;
+		bHasStart = true;
+		Coroutine.handle.resume();
+		return true;
+	}
+	return false;
+}
+
+bool FTurinmaProcess::Stop()
+{
+	if(bHasFinish)
+	{
+		return false;
+	}
+	if(bHasStart)
+	{
+		bShouldExit = true;
+		Coroutine.handle.resume();
+		check(Coroutine.handle.done());
+	}
+	return false;
+}
+
+void FTurinmaProcess::Tick()
+{
+	if(IsRunning())
+	{
+		Coroutine.handle.resume();
+	}
+}
 
 bool FTurinmaProcess::IsGraphValid(int32 GraphIndex)
 {
@@ -354,6 +432,21 @@ bool FTurinmaProcess::LocalJmp(FTurinmaProcessCallInfoItem& Item, int32 NodeInde
 	return false;
 }
 
+bool FTurinmaProcess::Return()
+{
+	if(CallInfos.IsValidIndex(CurCallInfo))
+	{
+		auto&& CallInfo = CallInfos[CurCallInfo];
+		if(CallInfo.CallStack.Num() > 0)
+		{
+			CallInfo.CallStack.Pop();
+			return true;
+		}
+	}
+	
+	return true;
+}
+
 void FTurinmaProcess::RecordError(const FTurinmaErrorContent& InErrorContent)
 {
 	ErrorInfo.bError = true;
@@ -362,13 +455,13 @@ void FTurinmaProcess::RecordError(const FTurinmaErrorContent& InErrorContent)
 
 FTurinmaCoroutine FTurinmaProcess::Execute()
 {
-	if(CallInfos.IsValidIndex(CurCallInfo))
+	while (!bShouldExit && !ErrorInfo.bError)
 	{
-		while(!bShouldExit && !ErrorInfo.bError && CallInfos.IsValidIndex(CurCallInfo) && CallInfos[CurCallInfo].CallStack.Num() > 0)
+		if (CallInfos.IsValidIndex(CurCallInfo) && CallInfos[CurCallInfo].CallStack.Num() > 0)
 		{
 			auto&& CallInfo = CallInfos[CurCallInfo];
 			auto&& CallItem = CallInfo.CallStack.Last();
-			if(CallItem.LocalNodeIndex.Num() > 0)
+			if (CallItem.LocalNodeIndex.Num() > 0)
 			{
 				auto&& NodeItem = CallItem.LocalNodeIndex.Last();
 
@@ -447,15 +540,15 @@ FTurinmaCoroutine FTurinmaProcess::Execute()
 					{
 						auto&& V = CallItem.TempLocalVariables.FindOrAdd(NodeItem.NodeIndex);
 						V.Reset(NodeData.NodeData->OutputParams.Num());
-						if(NodeItem.NodeOutput.Num() != NodeData.NodeData->OutputParams.Num())
+						if (NodeItem.NodeOutput.Num() != NodeData.NodeData->OutputParams.Num())
 						{
 							RecordError(FTurinmaErrorContent());
 							break;
 						}
 						bool bAnyError = false;
-						for(int OutI = 0; OutI < NodeItem.NodeOutput.Num(); ++OutI)
+						for (int OutI = 0; OutI < NodeItem.NodeOutput.Num(); ++OutI)
 						{
-							if(NodeItem.NodeOutput[OutI].ValueType != NodeData.NodeData->OutputParams[OutI].ValueType)
+							if (NodeItem.NodeOutput[OutI].ValueType != NodeData.NodeData->OutputParams[OutI].ValueType)
 							{
 								bAnyError = true;
 								RecordError(FTurinmaErrorContent());
@@ -463,7 +556,7 @@ FTurinmaCoroutine FTurinmaProcess::Execute()
 							}
 							V.Add(NodeItem.NodeOutput[OutI]);
 						}
-						if(bAnyError)
+						if (bAnyError)
 						{
 							break;
 						}
@@ -475,14 +568,14 @@ FTurinmaCoroutine FTurinmaProcess::Execute()
 					[[fallthrough]];
 					case FTurinmaProcessCallInfoItem::FLocalNodeIndex::ELocalNodeIndexStatus::Finish:
 					{
-						if(NodeItem.WhichNextToGo != INDEX_NONE)
+						if (NodeItem.WhichNextToGo != INDEX_NONE)
 						{
-							if(NodeData.NodeData->NextNodes.IsValidIndex(NodeItem.WhichNextToGo))
+							if (NodeData.NodeData->NextNodes.IsValidIndex(NodeItem.WhichNextToGo))
 							{
 								auto NextNode = NodeData.NodeData->NextNodes[NodeItem.WhichNextToGo];
-								if(IsNodeValid(CallItem.GraphIndex, NextNode.NextNode))
+								if (IsNodeValid(CallItem.GraphIndex, NextNode.NextNode))
 								{
-									if(IsNodePure(CallItem.GraphIndex, NextNode.NextNode))
+									if (IsNodePure(CallItem.GraphIndex, NextNode.NextNode))
 									{
 										RecordError(FTurinmaErrorContent());
 										break;
@@ -506,18 +599,21 @@ FTurinmaCoroutine FTurinmaProcess::Execute()
 						else
 						{
 							CallItem.LocalNodeIndex.RemoveAt(CallItem.LocalNodeIndex.Num() - 1);
-							//todo finish whole graph
+							if (CallItem.LocalNodeIndex.Num() == 0)
+							{
+								Return();
+							}
 						}
 					};
-						break;
+					break;
 					default:;
 					}
-
-					co_await std::suspend_always{};//todo coroutine not finish yet
 				}
 			}
 		}
+		co_await std::suspend_always{};//todo coroutine not finish yet
 	}
+	
 
 }
 

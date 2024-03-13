@@ -254,6 +254,7 @@ template<> struct TStructOpsTypeTraits<FTurinmaGraphNodeParamDescInfo> : public 
 struct FTurinmaNodeCreateInfo
 {
 	int32 DataIndex = INDEX_NONE;
+	int32 NodeIndex = INDEX_NONE;
 };
 
 USTRUCT(BlueprintType)
@@ -352,7 +353,7 @@ protected:
 public:
 
 	int32 DataIndex = INDEX_NONE;
-
+	int32 NodeIndex = INDEX_NONE;
 	
 public:
 	template<typename T>
@@ -432,6 +433,26 @@ struct FTurinmaGraphInputNodeData : public FTurinmaGraphNodeDataBase
 struct FTurinmaGraphInputNode : FTurinmaGraphNodeBase
 {
 	DECLARE_TURINMA_GRAPH_NODE(FTurinmaGraphInputNode)
+
+	virtual bool Execute(const FTurinmaNodeExecuteParam& ExecuteParam) override;
+};
+
+USTRUCT()
+struct FTurinmaGraphOutputNodeData : public FTurinmaGraphNodeDataBase
+{
+	GENERATED_BODY()
+
+	DECLARE_TURINMA_GRAPH_NODE_DATA(FTurinmaGraphOutputNodeData)
+
+	virtual TSharedPtr<struct FTurinmaGraphNodeBase> CreateNode(const FTurinmaNodeCreateInfo& CreateInfo) override;
+};
+
+
+struct FTurinmaGraphOutputNode : FTurinmaGraphNodeBase
+{
+	DECLARE_TURINMA_GRAPH_NODE(FTurinmaGraphOutputNode)
+
+	virtual bool Execute(const FTurinmaNodeExecuteParam& ExecuteParam) override;
 };
 
 
@@ -622,6 +643,8 @@ struct FTurinmaProcessCallInfoItem
 	TMap<int32, TArray<FTurinmaValue>> TempLocalVariables;
 
 
+	TArray<FTurinmaValue> GraphInputValue;
+	TArray<FTurinmaValue> GraphOutputValue;
 };
 //a call info mean a thread
 struct FTurinmaProcessCallInfo
@@ -642,17 +665,16 @@ struct FTurinmaErrorInfo
 
 
 struct FTurinmaCoroutine {
+	friend class FTurinmaProcess;
 	struct FTurinmaPromise {
+		class FTurinmaProcess* Process = nullptr;
 		FTurinmaCoroutine get_return_object() {
 			return std::coroutine_handle<FTurinmaPromise>::from_promise(*this);
 		}
 		std::suspend_always initial_suspend() { return {}; }//协程创建之后，协程函数体执行之前的时候执行此函数，等同于co_await initial_suspend();这里返回suspend_always
 		//表示创建调用函数创建协程对象后立马返回，不执行协程函数真正的函数体，知道外面调用resume
-		std::suspend_never final_suspend() noexcept
-		{
-			UE_LOG(LogTemp, Log, TEXT("SWP :: Suspend"));
-			return {};
-		}//协程函数体执行全部完成之后执行此函数，等同于co_await final_suspend();
+		std::suspend_never final_suspend() noexcept;
+		
 
 		// 协程函数要返回某种类型的值的话（即co_return XXX），
 		// 需要在promise里声明void return_value(类型 value)函数。
@@ -670,8 +692,12 @@ struct FTurinmaCoroutine {
 
 	using promise_type = FTurinmaPromise;
 	FTurinmaCoroutine(std::coroutine_handle<FTurinmaPromise> h) : handle(h) {}
-
+	FTurinmaCoroutine() = default;
+	FTurinmaCoroutine(const FTurinmaCoroutine&) = default;
+	FTurinmaCoroutine& operator=(const FTurinmaCoroutine&) = default;
 	std::coroutine_handle<FTurinmaPromise> handle;
+private:
+	
 };
 
 
@@ -679,6 +705,26 @@ struct FTurinmaCoroutine {
 
 class TURINMALUA_API FTurinmaProcess
 {
+
+	friend struct FTurinmaCoroutine;
+	FTurinmaCoroutine Coroutine;
+	bool bHasStart = false;
+	bool bHasFinish = false;
+public:
+	~FTurinmaProcess()
+	{
+		Stop();
+	}
+	bool Start();
+	bool Stop();
+
+	void Tick();
+
+	bool IsRunning() const
+	{
+		return bHasStart && !bHasFinish;
+	}
+
 	TWeakObjectPtr<UTurinmaProgram> Program;
 	FTurinmaProcessHeap Heap;
 	FTurinmaProcessGlobal Globals;
@@ -697,6 +743,8 @@ class TURINMALUA_API FTurinmaProcess
 	bool IsNodeValid(int32 GraphIndex, int32 NodeIndex);
 	bool IsNodePure(int32 GraphIndex, int32 NodeIndex);
 	bool LocalJmp(FTurinmaProcessCallInfoItem& Item, int32 NodeIndex);
+
+	bool Return();
 
 	void RecordError(const FTurinmaErrorContent& InErrorContent);
 
