@@ -261,6 +261,75 @@ bool FTurinmaGraphOutputNode::Execute(const FTurinmaNodeExecuteParam& ExecutePar
 	return true;
 }
 
+TSharedPtr<FTurinmaGraphNodeBase> FTurinmaCallGraphNodeData::CreateNode(const FTurinmaNodeCreateInfo& CreateInfo)
+{
+	auto S = MakeShared<FTurinmaCallGraphNode>();
+	S->DataIndex = CreateInfo.DataIndex;
+	S->NodeIndex = CreateInfo.NodeIndex;
+	S->GraphName = GraphName;
+	return S;
+}
+
+TArray<FTurinmaGraphNodeParamDescInfo> FTurinmaCallGraphNodeData::GetInputParamDescs() const
+{
+	if(ProgramIn)
+	{
+		auto* Res = ProgramIn->NameToGraph.Find(GraphName);
+		if(Res && ProgramIn->GraphDatas.IsValidIndex(*Res))
+		{
+			auto&& GraphData = ProgramIn->GraphDatas[*Res];
+			if(GraphData.NodeDatas.IsValidIndex(GraphData.StartNodeIndex))
+			{
+				return GraphData.NodeDatas[GraphData.StartNodeIndex].NodeData->GetOutputParamDescs();
+			}
+		}
+	}
+	return {};
+}
+
+TArray<FTurinmaGraphNodeParamDescInfo> FTurinmaCallGraphNodeData::GetOutputParamDescs() const
+{
+	if (ProgramIn)
+	{
+		auto* Res = ProgramIn->NameToGraph.Find(GraphName);
+		if (Res && ProgramIn->GraphDatas.IsValidIndex(*Res))
+		{
+			auto&& GraphData = ProgramIn->GraphDatas[*Res];
+			if (GraphData.NodeDatas.IsValidIndex(GraphData.EndNodeIndex))
+			{
+				return GraphData.NodeDatas[GraphData.EndNodeIndex].NodeData->GetInputParamDescs();
+			}
+		}
+	}
+	return {};
+}
+
+DEFINE_TURINMA_GRAPH_NODE(FTurinmaCallGraphNode)
+
+bool FTurinmaCallGraphNode::Execute(const FTurinmaNodeExecuteParam& ExecuteParam)
+{
+	auto&& CallInfo = ExecuteParam.Process->CallInfos[ExecuteParam.CurCallInfo];
+	auto&& CallItem = CallInfo.CallStack[ExecuteParam.CurCallItem];
+	auto&& NodeItem = CallItem.LocalNodeIndex[ExecuteParam.MyIndex];
+	auto NodeInput = NodeItem.NodeInput;
+
+	auto* Res= ExecuteParam.Process->GraphNameToGraphIndex.Find(GraphName);
+
+	if(Res)
+	{
+		bool JunpSuc = ExecuteParam.Process->LongJmp(CallInfo, *Res);
+		if(JunpSuc)
+		{
+			auto&& NewCallItem = CallInfo.CallStack.Last();
+			NewCallItem.GraphInputValue = NodeInput;
+			NewCallItem.JumpIntoNodeIndex = NodeIndex;
+			return true;
+		}
+		return false;
+	}
+	return false;
+}
+
 UE_DISABLE_OPTIMIZATION
 
 
@@ -308,14 +377,41 @@ HelloCoroutine hello() {
 
 
 
-void FTurinmaGraph::InitWithDataAndInfo(const FTurinmaGraphData& InData, const FTurinmaGraphCreateInfo& InInfo)
+bool FTurinmaGraph::InitWithDataAndInfo(const FTurinmaGraphData& InData, const FTurinmaGraphCreateInfo& InInfo)
 {
 	DataIndex = InInfo.DataIndex;
+	GraphIndex = InInfo.GraphIndex;
 	for(int NodeDataIndx = 0; NodeDataIndx < InData.NodeDatas.Num(); ++NodeDataIndx)
 	{
 		auto&& Item = InData.NodeDatas[NodeDataIndx];
 		int32 NodeIndx = Nodes.Num();
+		if(!Item.NodeData->IsInputMatch())
+		{
+			Nodes.Empty();
+			return false;
+		}
+		if(Item.NodeType == FTurinmaGraphInputNodeData::StaticStruct())
+		{
+			if(StartNodeIndex == INDEX_NONE)
+			{
+				StartNodeIndex = NodeIndx;
+			}
+			else
+			{
+				Nodes.Empty();
+				return false; //no more than one input node
+			}
+		}
 		Nodes.Add(Item.NodeData->CreateNode({ NodeDataIndx , NodeIndx}));
+	}
+	if(StartNodeIndex != INDEX_NONE)
+	{
+		return true;
+	}
+	else
+	{
+		Nodes.Empty();
+		return false; //must have one input node
 	}
 }
 
@@ -337,20 +433,64 @@ std::suspend_never FTurinmaCoroutine::FTurinmaPromise::final_suspend() noexcept
 	return {};
 }
 
+bool FTurinmaProcess::InitProcessByProgram()
+{
+	if(!Program.IsValid() || Program->GraphDatas.Num() == 0)
+	{
+		return false;
+	}
+
+	for(int32 DataIndex = 0; DataIndex < Program->GraphDatas.Num(); ++DataIndex)
+	{
+		FTurinmaGraphCreateInfo GraphCreateInfo;
+		GraphCreateInfo.GraphIndex = Graphs.Num();
+		GraphCreateInfo.DataIndex = DataIndex;
+
+		auto* TurinmaGraph = new FTurinmaGraph();
+		if(!TurinmaGraph->InitWithDataAndInfo(Program->GraphDatas[DataIndex], GraphCreateInfo))
+		{
+			Graphs.Empty();
+			return false;
+		}
+		Graphs.Add(TurinmaGraph);
+		if(GraphNameToGraphIndex.Find(Program->GraphDatas[DataIndex].GraphName))
+		{
+			Graphs.Empty();
+			return false;
+		}
+		GraphNameToGraphIndex.Add(Program->GraphDatas[DataIndex].GraphName, GraphCreateInfo.GraphIndex);
+	}
+
+	return true;
+}
+
 bool FTurinmaProcess::Start()
 {
 	if(bHasStart)
 	{
 		return false;
 	}
-	if(Program.IsValid())
+	if(InitProcessByProgram())
 	{
-		//todo init process by program
-		Coroutine = Execute();
-		Coroutine.handle.promise().Process = this;
-		bHasStart = true;
-		Coroutine.handle.resume();
-		return true;
+		int* Entry = GraphNameToGraphIndex.Find(EntryGraphName);
+		if(Entry)
+		{
+			check(CallInfos.Num() == 0);
+			auto* CallInfo = new FTurinmaProcessCallInfo();
+			CallInfos.Add(CallInfo);
+			auto&& CallStack = CallInfo->CallStack.AddDefaulted_GetRef();
+			CallStack.GraphIndex = *Entry;
+			auto&& IndexItem = CallStack.LocalNodeIndex.AddDefaulted_GetRef();
+			IndexItem.NodeIndex = Graphs[*Entry].StartNodeIndex;
+			check(IndexItem.NodeIndex > INDEX_NONE)
+			CurCallInfo = 0;
+
+			Coroutine = Execute();
+			Coroutine.handle.promise().Process = this;
+			bHasStart = true;
+			Coroutine.handle.resume();
+			return true;
+		}
 	}
 	return false;
 }
@@ -366,6 +506,7 @@ bool FTurinmaProcess::Stop()
 		bShouldExit = true;
 		Coroutine.handle.resume();
 		check(Coroutine.handle.done());
+		CallInfos.Empty();
 	}
 	return false;
 }
@@ -432,6 +573,21 @@ bool FTurinmaProcess::LocalJmp(FTurinmaProcessCallInfoItem& Item, int32 NodeInde
 	return false;
 }
 
+bool FTurinmaProcess::LongJmp(FTurinmaProcessCallInfo& CallInfo, int32 GraphIndex)
+{
+	if(IsGraphValid(GraphIndex))
+	{
+		auto&& CallItem = CallInfo.CallStack.AddDefaulted_GetRef();
+		CallItem.GraphIndex = GraphIndex;
+		if(Graphs[GraphIndex].StartNodeIndex != INDEX_NONE)
+		{
+			return LocalJmp(CallItem, Graphs[GraphIndex].StartNodeIndex);
+		}
+		return false;
+	}
+	return false;
+}
+
 bool FTurinmaProcess::Return()
 {
 	if(CallInfos.IsValidIndex(CurCallInfo))
@@ -439,7 +595,11 @@ bool FTurinmaProcess::Return()
 		auto&& CallInfo = CallInfos[CurCallInfo];
 		if(CallInfo.CallStack.Num() > 0)
 		{
+			int32 JumpIntoNodeIndex = CallInfo.CallStack.Last().JumpIntoNodeIndex;
+			auto GraphOutput = CallInfo.CallStack.Last().GraphOutputValue;
+
 			CallInfo.CallStack.Pop();
+			CallInfo.CallStack.Last().TempLocalVariables.FindOrAdd(JumpIntoNodeIndex) = GraphOutput;
 			return true;
 		}
 	}
@@ -455,6 +615,7 @@ void FTurinmaProcess::RecordError(const FTurinmaErrorContent& InErrorContent)
 
 FTurinmaCoroutine FTurinmaProcess::Execute()
 {
+	int32 CurLeftExecuteNum = MaxNumExecutePerTick;
 	while (!bShouldExit && !ErrorInfo.bError)
 	{
 		if (CallInfos.IsValidIndex(CurCallInfo) && CallInfos[CurCallInfo].CallStack.Num() > 0)
@@ -525,6 +686,8 @@ FTurinmaCoroutine FTurinmaProcess::Execute()
 						Param.CurCallInfo = CurCallInfo;
 						Param.CurCallItem = CallInfo.CallStack.Num() - 1;
 						Param.MyIndex = CallItem.LocalNodeIndex.Num() - 1;
+						int32 NumOfStack = CallInfo.CallStack.Num();
+						int32 NumOfCallNode = CallItem.LocalNodeIndex.Num();
 						if (!Node->Execute(Param))
 						{
 							RecordError(FTurinmaErrorContent());
@@ -533,14 +696,19 @@ FTurinmaCoroutine FTurinmaProcess::Execute()
 						else
 						{
 							NodeItem.Status = FTurinmaProcessCallInfoItem::FLocalNodeIndex::ELocalNodeIndexStatus::PushingResult;
+							if (NumOfStack != CallInfo.CallStack.Num() || NumOfCallNode != CallItem.LocalNodeIndex.Num()) //jump happened 
+							{
+								break;
+							}
 						}
 					};
 					[[fallthrough]];
 					case FTurinmaProcessCallInfoItem::FLocalNodeIndex::ELocalNodeIndexStatus::PushingResult:
 					{
 						auto&& V = CallItem.TempLocalVariables.FindOrAdd(NodeItem.NodeIndex);
-						V.Reset(NodeData.NodeData->OutputParams.Num());
-						if (NodeItem.NodeOutput.Num() != NodeData.NodeData->OutputParams.Num())
+						auto&& OutputParams = NodeData.NodeData->GetOutputParamDescs();
+						V.Reset(OutputParams.Num());
+						if (NodeItem.NodeOutput.Num() != OutputParams.Num())
 						{
 							RecordError(FTurinmaErrorContent());
 							break;
@@ -548,7 +716,7 @@ FTurinmaCoroutine FTurinmaProcess::Execute()
 						bool bAnyError = false;
 						for (int OutI = 0; OutI < NodeItem.NodeOutput.Num(); ++OutI)
 						{
-							if (NodeItem.NodeOutput[OutI].ValueType != NodeData.NodeData->OutputParams[OutI].ValueType)
+							if (NodeItem.NodeOutput[OutI].ValueType != OutputParams[OutI].ValueType)
 							{
 								bAnyError = true;
 								RecordError(FTurinmaErrorContent());
@@ -611,7 +779,12 @@ FTurinmaCoroutine FTurinmaProcess::Execute()
 				}
 			}
 		}
-		co_await std::suspend_always{};//todo coroutine not finish yet
+		--CurLeftExecuteNum;
+		if(CurLeftExecuteNum <= 0)
+		{
+			CurLeftExecuteNum = MaxNumExecutePerTick;
+			co_await std::suspend_always{};//todo coroutine not finish yet
+		}
 	}
 	
 

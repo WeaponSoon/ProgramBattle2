@@ -262,6 +262,8 @@ struct TURINMALUA_API FTurinmaGraphNodeDataBase
 {
 	GENERATED_BODY()
 
+	UPROPERTY()
+	class UTurinmaProgram* ProgramIn = nullptr;
 
 	UPROPERTY(EditAnywhere)
 	bool IsPure = false;
@@ -271,10 +273,26 @@ struct TURINMALUA_API FTurinmaGraphNodeDataBase
 	TArray<FTurinmaGraphNodeLinkInfo> NextNodes;
 	UPROPERTY(VisibleAnywhere)
 	TArray<FTurinmaGraphNodeParamLinkInfo> InputParams;
-	UPROPERTY(VisibleAnywhere)
-	TArray<FTurinmaGraphNodeParamDescInfo> OutputParams;
+	
+
+	virtual TArray<FTurinmaGraphNodeParamDescInfo> GetOutputParamDescs() const { return {}; }
+	virtual TArray<FTurinmaGraphNodeParamDescInfo> GetInputParamDescs() const { return {}; };
 
 
+	virtual bool IsInputMatch() const
+	{
+		auto&& InputParamDescs = GetOutputParamDescs();
+		return InputParamDescs.Num() == InputParams.Num();
+	}
+	virtual bool CanModifyInputParamsDesc() const
+	{
+		return false;
+	}
+
+	virtual bool CanModifyOutputParamsDesc() const
+	{
+		return false;
+	}
 
 	template<typename T>
 	T* GetTyped()
@@ -427,6 +445,18 @@ struct FTurinmaGraphInputNodeData : public FTurinmaGraphNodeDataBase
 	DECLARE_TURINMA_GRAPH_NODE_DATA(FTurinmaGraphInputNodeData)
 
 	virtual TSharedPtr<struct FTurinmaGraphNodeBase> CreateNode(const FTurinmaNodeCreateInfo& CreateInfo) override;
+
+	TArray<FTurinmaGraphNodeParamDescInfo> OutputParamDesc;
+
+	virtual TArray<FTurinmaGraphNodeParamDescInfo> GetOutputParamDescs() const override
+	{
+		return OutputParamDesc;
+	}
+
+	virtual bool CanModifyOutputParamsDesc() const override
+	{
+		return true;
+	}
 };
 
 
@@ -435,6 +465,7 @@ struct FTurinmaGraphInputNode : FTurinmaGraphNodeBase
 	DECLARE_TURINMA_GRAPH_NODE(FTurinmaGraphInputNode)
 
 	virtual bool Execute(const FTurinmaNodeExecuteParam& ExecuteParam) override;
+
 };
 
 USTRUCT()
@@ -445,6 +476,19 @@ struct FTurinmaGraphOutputNodeData : public FTurinmaGraphNodeDataBase
 	DECLARE_TURINMA_GRAPH_NODE_DATA(FTurinmaGraphOutputNodeData)
 
 	virtual TSharedPtr<struct FTurinmaGraphNodeBase> CreateNode(const FTurinmaNodeCreateInfo& CreateInfo) override;
+
+
+	TArray<FTurinmaGraphNodeParamDescInfo> InputParamDesc;
+
+	virtual TArray<FTurinmaGraphNodeParamDescInfo> GetInputParamDescs() const override
+	{
+		return InputParamDesc;
+	}
+
+	virtual bool CanModifyInputParamsDesc() const override
+	{
+		return true;
+	}
 };
 
 
@@ -456,10 +500,44 @@ struct FTurinmaGraphOutputNode : FTurinmaGraphNodeBase
 };
 
 
+USTRUCT()
+struct FTurinmaCallGraphNodeData : public FTurinmaGraphNodeDataBase
+{
+	GENERATED_BODY()
+
+	DECLARE_TURINMA_GRAPH_NODE_DATA(FTurinmaCallGraphNodeData)
+
+	UPROPERTY()
+	FName GraphName = NAME_None;
+
+	virtual TSharedPtr<struct FTurinmaGraphNodeBase> CreateNode(const FTurinmaNodeCreateInfo& CreateInfo) override;
+	virtual TArray<FTurinmaGraphNodeParamDescInfo> GetInputParamDescs() const override;
+	virtual TArray<FTurinmaGraphNodeParamDescInfo> GetOutputParamDescs() const override;
+	
+};
+
+struct FTurinmaCallGraphNode : FTurinmaGraphNodeBase
+{
+	DECLARE_TURINMA_GRAPH_NODE(FTurinmaCallGraphNode)
+
+	FName GraphName = NAME_None;
+	virtual bool Execute(const FTurinmaNodeExecuteParam& ExecuteParam) override;
+};
+
+
 USTRUCT(BlueprintType)
 struct TURINMALUA_API FTurinmaGraphData
 {
 	GENERATED_BODY()
+
+	UPROPERTY()
+	FName GraphName;
+
+	UPROPERTY(Transient)
+	int32 StartNodeIndex = INDEX_NONE;
+
+	UPROPERTY(Transient)
+	int32 EndNodeIndex = INDEX_NONE;
 
 	enum class FTurinmaGraphDataVersion : uint16
 	{
@@ -542,6 +620,8 @@ struct TURINMALUA_API FTurinmaGraphData
 			FTurinmaGraphDataVersion CurV = FTurinmaGraphDataVersion::Last;
 			Ar << CurV;
 
+			Ar << GraphName;
+
 			int32 NumOfNode = NodeDatas.Num();
 			Ar << NumOfNode;
 			for(int i = 0; i < NumOfNode; ++i)
@@ -553,12 +633,22 @@ struct TURINMALUA_API FTurinmaGraphData
 		{
 			Ar << Version;
 
+			Ar << GraphName;
+
 			int32 NumOfNode = 0;
 			Ar << NumOfNode;
 			NodeDatas.AddDefaulted(NumOfNode);
 			for (int i = 0; i < NumOfNode; ++i)
 			{
 				NodeDatas[i].Serialize(Ar);
+				if(NodeDatas[i].NodeType == FTurinmaGraphInputNodeData::StaticStruct())
+				{
+					StartNodeIndex = i;
+				}
+				if (NodeDatas[i].NodeType == FTurinmaGraphOutputNodeData::StaticStruct())
+				{
+					EndNodeIndex = i;
+				}
 			}
 		}
 		return true;
@@ -581,19 +671,21 @@ template<> struct TStructOpsTypeTraits<FTurinmaGraphData> : public TStructOpsTyp
 
 struct FTurinmaGraphCreateInfo
 {
+	int32 GraphIndex = INDEX_NONE;
 	int32 DataIndex = INDEX_NONE;
 };
 
 struct FTurinmaGraph
 {
+	int32 GraphIndex = INDEX_NONE;
 	int32 DataIndex = INDEX_NONE;
 
 	TArray<TSharedPtr<FTurinmaGraphNodeBase>> Nodes;
 
-	
+	int32 StartNodeIndex = INDEX_NONE;
 
 
-	void InitWithDataAndInfo(const FTurinmaGraphData& InData, const FTurinmaGraphCreateInfo& InInfo);
+	bool InitWithDataAndInfo(const FTurinmaGraphData& InData, const FTurinmaGraphCreateInfo& InInfo);
 };
 
 
@@ -607,6 +699,19 @@ public:
 	UPROPERTY()
 	TArray<FTurinmaGraphData> GraphDatas;
 
+	UPROPERTY(Transient)
+	TMap<FName, int32> NameToGraph;
+
+
+	virtual void PostLoad() override
+	{
+		NameToGraph.Empty(GraphDatas.Num());
+		for(int32 I = 0; I < GraphDatas.Num(); ++I)
+		{
+			auto&& Item = GraphDatas[I];
+			NameToGraph.Add(Item.GraphName, I);
+		}
+	}
 };
 
 struct FTurinmaProcessHeap
@@ -636,6 +741,9 @@ struct FTurinmaProcessCallInfoItem
 		TArray<FTurinmaValue> NodeOutput;
 		int32 WhichNextToGo = INDEX_NONE;
 	};
+
+	int32 JumpIntoNodeIndex = INDEX_NONE;
+
 	int32 GraphIndex = INDEX_NONE;
 	//FTurinmaGraph* Graph = nullptr;
 	TArray<FLocalNodeIndex> LocalNodeIndex;
@@ -710,7 +818,16 @@ class TURINMALUA_API FTurinmaProcess
 	FTurinmaCoroutine Coroutine;
 	bool bHasStart = false;
 	bool bHasFinish = false;
+	bool bShouldExit = false;
+
+	bool InitProcessByProgram();
+
 public:
+
+	int32 MaxNumExecutePerTick = 10;
+
+	FName EntryGraphName = TEXT("Main");
+
 	~FTurinmaProcess()
 	{
 		Stop();
@@ -730,8 +847,7 @@ public:
 	FTurinmaProcessGlobal Globals;
 	TIndirectArray<FTurinmaGraph> Graphs;
 	TIndirectArray<FTurinmaProcessCallInfo> CallInfos;
-
-	bool bShouldExit = false;
+	TMap<FName, int32> GraphNameToGraphIndex;
 
 	FTurinmaErrorInfo ErrorInfo;
 
@@ -743,7 +859,7 @@ public:
 	bool IsNodeValid(int32 GraphIndex, int32 NodeIndex);
 	bool IsNodePure(int32 GraphIndex, int32 NodeIndex);
 	bool LocalJmp(FTurinmaProcessCallInfoItem& Item, int32 NodeIndex);
-
+	bool LongJmp(FTurinmaProcessCallInfo& CallInfo, int32 GraphIndex);
 	bool Return();
 
 	void RecordError(const FTurinmaErrorContent& InErrorContent);
