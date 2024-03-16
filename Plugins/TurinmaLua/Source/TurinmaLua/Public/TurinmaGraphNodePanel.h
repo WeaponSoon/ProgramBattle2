@@ -5,6 +5,7 @@
 #include "Rendering/DrawElementTypes.h"
 #include "TurinmaProgram.h"
 #include "Components/Image.h"
+#include "Components/EditableText.h"
 #include "TurinmaGraphNodePanel.generated.h"
 
 
@@ -19,6 +20,22 @@ class TURINMALUA_API ITurinmaParamTitleWidgetInterface
 {
 	GENERATED_BODY()
 
+public:
+
+	UFUNCTION(BlueprintImplementableEvent)
+	void OnSetTurinmaGraphNodeWidget(class UTurinmaGraphNodeBaseWidget* InWidget);
+
+	UFUNCTION(BlueprintImplementableEvent)
+	void SetEditable(bool bEditable);
+
+	UFUNCTION(BlueprintImplementableEvent)
+	bool IsEditable() const;
+
+	UFUNCTION(BlueprintImplementableEvent)
+	void SetTitle(const FString& InString);
+
+	UFUNCTION(BlueprintImplementableEvent)
+	FString GetTitle() const;
 };
 
 
@@ -100,5 +117,7 @@ public:
 	TArray<TSubclassOf<UWidget>> ParamOutputInterface;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (MustImplement = "/Script/TurinmaLua.TurinmaParamPinWidgetInterface"))
 	TArray<TSubclassOf<UWidget>> ParamInputInterface;
+
+
 
 };
