@@ -376,6 +376,55 @@ HelloCoroutine hello() {
 }
 
 
+bool FTurinmaGraphData::Serialize(FArchive& Ar)
+{
+
+	if (Ar.IsSaving())
+	{
+		FTurinmaGraphDataVersion CurV = FTurinmaGraphDataVersion::Last;
+		Ar << CurV;
+
+		Ar << GraphName;
+
+		int32 NumOfNode = NodeDatas.Num();
+		Ar << NumOfNode;
+		for (int i = 0; i < NumOfNode; ++i)
+		{
+			NodeDatas[i].Serialize(Ar);
+		}
+	}
+	if (Ar.IsLoading())
+	{
+		Ar << Version;
+
+		Ar << GraphName;
+
+		int32 NumOfNode = 0;
+		Ar << NumOfNode;
+		NodeDatas.AddDefaulted(NumOfNode);
+		for (int i = 0; i < NumOfNode; ++i)
+		{
+			NodeDatas[i].Serialize(Ar);
+			if (NodeDatas[i].NodeType == FTurinmaGraphInputNodeData::StaticStruct())
+			{
+				StartNodeIndex = i;
+			}
+			if (NodeDatas[i].NodeType == FTurinmaGraphOutputNodeData::StaticStruct())
+			{
+				EndNodeIndex = i;
+			}
+		}
+	}
+	return true;
+}
+
+void FTurinmaGraphData::AddStructReferencedObjects(FReferenceCollector& Collector) const
+{
+	for (auto&& Item : NodeDatas)
+	{
+		const_cast<FTurinmaNodeDataItem&>(Item).AddReferencedObjects(Collector);
+	}
+}
 
 bool FTurinmaGraph::InitWithDataAndInfo(const FTurinmaGraphData& InData, const FTurinmaGraphCreateInfo& InInfo)
 {

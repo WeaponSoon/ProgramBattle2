@@ -5,8 +5,9 @@
 #include "CoreMinimal.h"
 #include "Engine/DataAsset.h"
 #include "TurinmaProgram.generated.h"
-
-
+#if !UE_BUILD_SHIPPING && !UE_BUILD_TEST
+UE_DISABLE_OPTIMIZATION
+#endif
 enum class ETurinmaValueType : uint8
 {
 	Nil = 0,
@@ -564,21 +565,97 @@ struct TURINMALUA_API FTurinmaGraphData
 
 		void AddReferencedObjects(FReferenceCollector& Collector)
 		{
-			check(NodeType == NodeData->GetDataType());
-			Collector.AddReferencedObject(NodeType);
-			Collector.AddPropertyReferences(NodeType, NodeData->GetThisPtr());
+			if(NodeType)
+			{
+				Collector.AddReferencedObject(NodeType);
+				if(NodeData)
+				{
+					check(NodeType == NodeData->GetDataType());
+					Collector.AddPropertyReferences(NodeType, NodeData->GetThisPtr());
+				}
+			}
+			
+		}
+
+		FTurinmaNodeDataItem() = default;
+		FTurinmaNodeDataItem(const FTurinmaNodeDataItem& Other) : NodeType(Other.NodeType)
+		{
+			UE_LOG(LogTemp, Log, TEXT("SWP:Copy Constructor"));
+			if(NodeType && Other.NodeData)
+			{
+				void* Data = FMemory::Malloc(NodeType->GetStructureSize());
+				NodeType->InitializeStruct(Data);
+				NodeType->CopyScriptStruct(Data, Other.NodeData);
+				NodeData = static_cast<FTurinmaGraphNodeDataBase*>(Data);
+			}
+		}
+
+		FTurinmaNodeDataItem(FTurinmaNodeDataItem&& Other) noexcept
+		{
+			UE_LOG(LogTemp, Log, TEXT("SWP:Move Constructor"));
+			NodeType = Other.NodeType;
+			NodeData = Other.NodeData;
+			Other.NodeType = nullptr;
+			Other.NodeData = nullptr;
 		}
 
 		~FTurinmaNodeDataItem()
 		{
-			NodeType->DestroyStruct(NodeData->GetThisPtr());
-			FMemory::Free(NodeData);
+			UE_LOG(LogTemp, Log, TEXT("SWP:Destructor"));
+			if(NodeType && NodeData)
+			{
+				NodeType->DestroyStruct(NodeData->GetThisPtr());
+				FMemory::Free(NodeData);
+			}
 		}
+
+		FTurinmaNodeDataItem& operator=(const FTurinmaNodeDataItem& Other)
+		{
+			UE_LOG(LogTemp, Log, TEXT("SWP:Copy Assignment"));
+			NodeType = Other.NodeType;
+			if (NodeType && Other.NodeData)
+			{
+				void* Data = FMemory::Malloc(NodeType->GetStructureSize());
+				NodeType->InitializeStruct(Data);
+				NodeType->CopyScriptStruct(Data, Other.NodeData);
+				NodeData = static_cast<FTurinmaGraphNodeDataBase*>(Data);
+			}
+			return *this;
+		}
+
+		FTurinmaNodeDataItem& operator=(FTurinmaNodeDataItem&& Other) noexcept
+		{
+			UE_LOG(LogTemp, Log, TEXT("SWP:Move Assignment"));
+			NodeType = Other.NodeType;
+			NodeData = Other.NodeData;
+			Other.NodeType = nullptr;
+			Other.NodeData = nullptr;
+			return *this;
+		}
+
+		bool operator==(const FTurinmaNodeDataItem& Other) const
+		{
+			if(NodeType == Other.NodeType)
+			{
+				if(NodeType)
+				{
+					if(NodeData)
+					{
+						return NodeType->CompareScriptStruct(NodeData, Other.NodeData, 0);
+					}
+					return !Other.NodeData;
+				}
+				return true;//both invalid
+			}
+			return false;
+		}
+
 
 		void Serialize(FArchive& Ar)
 		{
 			if(Ar.IsSaving())
 			{
+				UE_LOG(LogTemp, Log, TEXT("SWP: Saving"));
 				FTurinmaNodeDataItemVersion CurV = FTurinmaNodeDataItemVersion::Last;
 				Ar << CurV;
 
@@ -594,6 +671,7 @@ struct TURINMALUA_API FTurinmaGraphData
 			}
 			if(Ar.IsLoading())
 			{
+				UE_LOG(LogTemp, Log, TEXT("SWP: Loading"));
 				Ar << Version;
 
 				Ar << NodeType;
@@ -612,55 +690,9 @@ struct TURINMALUA_API FTurinmaGraphData
 
 	TArray<FTurinmaNodeDataItem> NodeDatas;
 
-	bool Serialize(FArchive& Ar)
-	{
-		
-		if(Ar.IsSaving())
-		{
-			FTurinmaGraphDataVersion CurV = FTurinmaGraphDataVersion::Last;
-			Ar << CurV;
+	bool Serialize(FArchive& Ar);
 
-			Ar << GraphName;
-
-			int32 NumOfNode = NodeDatas.Num();
-			Ar << NumOfNode;
-			for(int i = 0; i < NumOfNode; ++i)
-			{
-				NodeDatas[i].Serialize(Ar);
-			}
-		}
-		if(Ar.IsLoading())
-		{
-			Ar << Version;
-
-			Ar << GraphName;
-
-			int32 NumOfNode = 0;
-			Ar << NumOfNode;
-			NodeDatas.AddDefaulted(NumOfNode);
-			for (int i = 0; i < NumOfNode; ++i)
-			{
-				NodeDatas[i].Serialize(Ar);
-				if(NodeDatas[i].NodeType == FTurinmaGraphInputNodeData::StaticStruct())
-				{
-					StartNodeIndex = i;
-				}
-				if (NodeDatas[i].NodeType == FTurinmaGraphOutputNodeData::StaticStruct())
-				{
-					EndNodeIndex = i;
-				}
-			}
-		}
-		return true;
-	}
-
-	void AddStructReferencedObjects(class FReferenceCollector& Collector)
-	{
-		for (auto&& Item : NodeDatas)
-		{
-			Item.AddReferencedObjects(Collector);
-		}
-	}
+	void AddStructReferencedObjects(class FReferenceCollector& Collector) const;
 };
 
 
@@ -696,15 +728,27 @@ class TURINMALUA_API UTurinmaProgram : public UDataAsset
 	GENERATED_BODY()
 
 public:
-	UPROPERTY()
+	UPROPERTY(EditAnywhere)
 	TArray<FTurinmaGraphData> GraphDatas;
 
 	UPROPERTY(Transient)
 	TMap<FName, int32> NameToGraph;
 
 
+#if WITH_EDITOR
+	UFUNCTION(CallInEditor)
+	void AddSomeNodeInGraph()
+	{
+		for(auto&& Graph : GraphDatas)
+		{
+			Graph.NodeDatas.AddDefaulted();
+		}
+	}
+#endif
+
 	virtual void PostLoad() override
 	{
+		Super::PostLoad();
 		NameToGraph.Empty(GraphDatas.Num());
 		for(int32 I = 0; I < GraphDatas.Num(); ++I)
 		{
@@ -874,3 +918,6 @@ struct FTestClass
 
 	static FTestClass TestFFFFF;
 };
+#if !UE_BUILD_SHIPPING && !UE_BUILD_TEST
+UE_ENABLE_OPTIMIZATION
+#endif
