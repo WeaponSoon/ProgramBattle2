@@ -8,11 +8,29 @@
 
 
 USTRUCT(BlueprintType)
+struct TURINMALUA_API FTurinmaGraphItem
+{
+	GENERATED_BODY()
+
+	UPROPERTY(Transient)
+	UTurinmaProgram* Program = nullptr;
+
+	UPROPERTY(Transient)
+	int32 GraphIndex = INDEX_NONE;
+};
+
+USTRUCT(BlueprintType)
 struct TURINMALUA_API FTurinmaGraphNodeItem
 {
 	GENERATED_BODY()
 
-	FTurinmaGraphData::FTurinmaNodeDataItem TurinmaItem;
+	UPROPERTY(Transient)
+	FTurinmaGraphItem Graph;
+
+	UPROPERTY(Transient)
+	int32 NodeIndex = INDEX_NONE;
+
+
 };
 
 USTRUCT(BlueprintType)
@@ -24,6 +42,28 @@ struct TURINMALUA_API FTurinmaGraphNodeBrush
 	FSlateBrush Brush;
 };
 
+enum class ETurinmaPinKind
+{
+	None,
+	ExecInput,
+	ExecOutput,
+	ParamInput,
+	ParamOutput,
+};
+
+
+class TURINMALUA_API STurinmaGraphNodePin : public SCompoundWidget
+{
+	SLATE_BEGIN_ARGS(STurinmaGraphNodePin)
+		:_PinKind(ETurinmaPinKind::None), _ValueType(ETurinmaValueType::Nil)
+	{}
+	SLATE_ARGUMENT(ETurinmaPinKind, PinKind)
+	SLATE_ARGUMENT(ETurinmaValueType, ValueType)
+	SLATE_ARGUMENT(TWeakPtr<class STurinmaGraphNodeSlate>, Node)
+	SLATE_END_ARGS()
+
+	void Construct(const FArguments& InArgs);
+};
 
 class TURINMALUA_API STurinmaGraphNodeSlate : public SCompoundWidget
 {
@@ -41,6 +81,18 @@ class TURINMALUA_API STurinmaGraphNodeSlate : public SCompoundWidget
 
 private:
 	class UTurinmaGraphNodeBaseWidget* UMG = nullptr;
+
+	TSharedPtr<SImage> Background;
+	TSharedPtr<STextBlock> Title;
+	TSharedPtr<STextBlock> EditableTitle;
+
+	TSharedPtr<STurinmaGraphNodePin> ExecOutputPin;
+	TSharedPtr<STurinmaGraphNodePin> ExecInputPin;
+
+	TArray<TSharedPtr<STurinmaGraphNodePin>> InputPins;
+	TArray<TSharedPtr<STurinmaGraphNodePin>> OutputPins;
+
+
 };
 
 
@@ -55,11 +107,11 @@ class TURINMALUA_API UTurinmaGraphNodeBaseWidget : public UWidget
 
 	UPROPERTY(EditAnywhere, Category = Appearance)
 	FTurinmaGraphNodeBrush Brush;
-public:
 
+	FTurinmaGraphNodeItem TurinmaGraphNode;
+public:
 	virtual void BeginDestroy() override;
 
 	virtual TSharedRef<SWidget> RebuildWidget() override;
 	virtual void ReleaseSlateResources(bool bReleaseChildren) override;
-
 };

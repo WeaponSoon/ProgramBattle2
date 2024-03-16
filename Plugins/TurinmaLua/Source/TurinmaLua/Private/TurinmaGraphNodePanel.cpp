@@ -1,8 +1,18 @@
 #include "TurinmaGraphNodePanel.h"
 
+void STurinmaGraphNodePin::Construct(const FArguments& InArgs)
+{
+}
+
 void STurinmaGraphNodeSlate::Construct(const FArguments& InArgs)
 {
 	UMG = InArgs._UMG;
+
+	if(UMG)
+	{
+		
+	}
+
 }
 
 int32 STurinmaGraphNodeSlate::OnPaint(const FPaintArgs& Args, const FGeometry& AllottedGeometry,

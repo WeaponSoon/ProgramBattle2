@@ -737,11 +737,16 @@ public:
 
 #if WITH_EDITOR
 	UFUNCTION(CallInEditor)
-	void AddSomeNodeInGraph()
+	void Test_AddSomeNodeInGraph()
 	{
 		for(auto&& Graph : GraphDatas)
 		{
-			Graph.NodeDatas.AddDefaulted();
+			auto&& Data = Graph.NodeDatas.AddDefaulted_GetRef();
+			Data.NodeType = FTurinmaGraphInputNodeData::StaticStruct();
+			FTurinmaGraphInputNodeData* NodeData = (FTurinmaGraphInputNodeData*)FMemory::Malloc(Data.NodeType->GetStructureSize());
+			Data.NodeType->InitializeStruct(NodeData);
+			Data.NodeData = NodeData;
+			NodeData->InputParams.AddDefaulted_GetRef().ParamPin = 100;
 		}
 	}
 #endif
