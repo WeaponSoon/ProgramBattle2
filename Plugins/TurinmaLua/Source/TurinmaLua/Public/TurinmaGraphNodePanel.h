@@ -4,18 +4,46 @@
 #include "Blueprint/UserWidget.h"
 #include "Rendering/DrawElementTypes.h"
 #include "TurinmaProgram.h"
+#include "Components/Image.h"
 #include "TurinmaGraphNodePanel.generated.h"
 
+
+UINTERFACE(Blueprintable, BlueprintType)
+class TURINMALUA_API UTurinmaParamTitleWidgetInterface : public UInterface
+{
+	GENERATED_BODY()
+
+};
+
+class TURINMALUA_API ITurinmaParamTitleWidgetInterface
+{
+	GENERATED_BODY()
+
+};
+
+
+UINTERFACE(Blueprintable, BlueprintType)
+class TURINMALUA_API UTurinmaParamPinWidgetInterface : public UInterface
+{
+	GENERATED_BODY()
+
+};
+
+class TURINMALUA_API ITurinmaParamPinWidgetInterface
+{
+	GENERATED_BODY()
+
+};
 
 USTRUCT(BlueprintType)
 struct TURINMALUA_API FTurinmaGraphItem
 {
 	GENERATED_BODY()
 
-	UPROPERTY(Transient)
+	UPROPERTY(Transient, VisibleAnywhere)
 	UTurinmaProgram* Program = nullptr;
 
-	UPROPERTY(Transient)
+	UPROPERTY(Transient, VisibleAnywhere)
 	int32 GraphIndex = INDEX_NONE;
 };
 
@@ -24,23 +52,14 @@ struct TURINMALUA_API FTurinmaGraphNodeItem
 {
 	GENERATED_BODY()
 
-	UPROPERTY(Transient)
+	UPROPERTY(Transient, VisibleAnywhere)
 	FTurinmaGraphItem Graph;
 
-	UPROPERTY(Transient)
+	UPROPERTY(Transient, VisibleAnywhere)
 	int32 NodeIndex = INDEX_NONE;
-
-
+	
 };
 
-USTRUCT(BlueprintType)
-struct TURINMALUA_API FTurinmaGraphNodeBrush
-{
-	GENERATED_BODY()
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	FSlateBrush Brush;
-};
 
 enum class ETurinmaPinKind
 {
@@ -52,52 +71,8 @@ enum class ETurinmaPinKind
 };
 
 
-class TURINMALUA_API STurinmaGraphNodePin : public SCompoundWidget
-{
-	SLATE_BEGIN_ARGS(STurinmaGraphNodePin)
-		:_PinKind(ETurinmaPinKind::None), _ValueType(ETurinmaValueType::Nil)
-	{}
-	SLATE_ARGUMENT(ETurinmaPinKind, PinKind)
-	SLATE_ARGUMENT(ETurinmaValueType, ValueType)
-	SLATE_ARGUMENT(TWeakPtr<class STurinmaGraphNodeSlate>, Node)
-	SLATE_END_ARGS()
-
-	void Construct(const FArguments& InArgs);
-};
-
-class TURINMALUA_API STurinmaGraphNodeSlate : public SCompoundWidget
-{
-	friend class UTurinmaGraphNodeBaseWidget;
-
-	SLATE_BEGIN_ARGS(STurinmaGraphNodeSlate)
-	: _UMG(nullptr)
-	{}
-	SLATE_ARGUMENT(class UTurinmaGraphNodeBaseWidget*, UMG)
-	SLATE_END_ARGS()
-
-	void Construct(const FArguments& InArgs);
-
-	virtual int32 OnPaint(const FPaintArgs& Args, const FGeometry& AllottedGeometry, const FSlateRect& MyCullingRect, FSlateWindowElementList& OutDrawElements, int32 LayerId, const FWidgetStyle& InWidgetStyle, bool bParentEnabled) const override;
-
-private:
-	class UTurinmaGraphNodeBaseWidget* UMG = nullptr;
-
-	TSharedPtr<SImage> Background;
-	TSharedPtr<STextBlock> Title;
-	TSharedPtr<STextBlock> EditableTitle;
-
-	TSharedPtr<STurinmaGraphNodePin> ExecOutputPin;
-	TSharedPtr<STurinmaGraphNodePin> ExecInputPin;
-
-	TArray<TSharedPtr<STurinmaGraphNodePin>> InputPins;
-	TArray<TSharedPtr<STurinmaGraphNodePin>> OutputPins;
-
-
-};
-
-
 UCLASS(BlueprintType, Blueprintable)
-class TURINMALUA_API UTurinmaGraphNodeBaseWidget : public UWidget
+class TURINMALUA_API UTurinmaGraphNodeBaseWidget : public UUserWidget
 {
 	GENERATED_BODY()
 
@@ -105,13 +80,25 @@ class TURINMALUA_API UTurinmaGraphNodeBaseWidget : public UWidget
 
 	TSharedPtr<STurinmaGraphNodeSlate> MySlate;
 
-	UPROPERTY(EditAnywhere, Category = Appearance)
-	FTurinmaGraphNodeBrush Brush;
+	UPROPERTY(VisibleAnywhere, Category = Data)
+	FTurinmaGraphNodeItem NodeItem;
 
-	FTurinmaGraphNodeItem TurinmaGraphNode;
 public:
-	virtual void BeginDestroy() override;
 
-	virtual TSharedRef<SWidget> RebuildWidget() override;
-	virtual void ReleaseSlateResources(bool bReleaseChildren) override;
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, meta = (BindWidget))
+	UImage* Background = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (MustImplement = "/Script/TurinmaLua.TurinmaParamTitleWidgetInterface"))
+	TSubclassOf<UWidget> TitleClass;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	TSubclassOf<UWidget> ExecOutputPinClass;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	TSubclassOf<UWidget> ExecInputPinClass;
+	
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (MustImplement = "/Script/TurinmaLua.TurinmaParamPinWidgetInterface"))
+	TArray<TSubclassOf<UWidget>> ParamOutputInterface;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (MustImplement = "/Script/TurinmaLua.TurinmaParamPinWidgetInterface"))
+	TArray<TSubclassOf<UWidget>> ParamInputInterface;
+
 };
