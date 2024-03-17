@@ -8,6 +8,8 @@
 #if !UE_BUILD_SHIPPING && !UE_BUILD_TEST
 UE_DISABLE_OPTIMIZATION
 #endif
+
+UENUM(BlueprintType)
 enum class ETurinmaValueType : uint8
 {
 	Nil = 0,
@@ -222,7 +224,7 @@ struct FTurinmaGraphNodeParamDescInfo
 	FTurinmaGraphParamDescVersion Version;
 	ETurinmaValueType ValueType;
 	FName ExtraTypeInfo;
-
+	FName ParamName;
 
 	bool Serialize(FArchive& Ar)
 	{
@@ -233,6 +235,7 @@ struct FTurinmaGraphNodeParamDescInfo
 
 			Ar << ValueType;
 			Ar << ExtraTypeInfo;
+			Ar << ParamName;
 		}
 		if (Ar.IsLoading())
 		{
@@ -240,6 +243,7 @@ struct FTurinmaGraphNodeParamDescInfo
 
 			Ar << ValueType;
 			Ar << ExtraTypeInfo;
+			Ar << ParamName;
 		}
 		return true;
 	}
@@ -330,6 +334,10 @@ struct TURINMALUA_API FTurinmaGraphNodeDataBase
 	}
 
 	virtual TSharedPtr<struct FTurinmaGraphNodeBase> CreateNode(const FTurinmaNodeCreateInfo& CreatInfo) { return nullptr; }
+
+	virtual bool CanChangeNodeNameTo(const FString& InPendingName) { return false; }
+
+	virtual void ChangeNodeNameTo(FName InName) {};
 
 	virtual FName GetNodeName() const { return NAME_None; }
 
