@@ -18,7 +18,7 @@
 		{
 			"Name": "TurinmaLua",
 			"Type": "Runtime",
-			"LoadingPhase": "Default"
+			"LoadingPhase": "PreDefault"
 		},
 		{
 			"Name": "LuaSource",
