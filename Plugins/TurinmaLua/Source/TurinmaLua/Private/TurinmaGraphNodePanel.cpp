@@ -1,5 +1,6 @@
 #include "TurinmaGraphNodePanel.h"
 
+#include "MotionDelayBuffer.h"
 #include "Blueprint/WidgetTree.h"
 
 bool UTurinmaGraphNodeBaseWidget::Initialize()
@@ -128,5 +129,42 @@ void UTurinmaGraphNodeBaseWidget::InitData()
 			SetParamNode(OutputList, ParamOutputInterface, OutputParams, ParamOutputWidget, ETurinmaPinKind::ParamOutput);
 		}
 		
+	}
+}
+
+UTurinmaProgram* UTurinmaGraphPanelBaseWidget::PushNewHistory()
+{
+	if(!EditingProgram)
+	{
+		return nullptr;
+	}
+
+	
+	int32 SafeMaxHistoryCount = FMath::Max(1, MaxHistoryCount);
+
+	auto&& NewHistoryItem = HistoryBuffer.EnqueueDefaulted_GetRef();
+	NewHistoryItem = NewObject<UTurinmaProgram>(this);
+	if(HistoryBuffer.Count() > 1)
+	{
+		NewHistoryItem->CopyFrom(HistoryBuffer.PokeAtOffset(HistoryBuffer.Count() - 2));
+	}
+	else
+	{
+		NewHistoryItem->CopyFrom(EditingProgram);
+	}
+	if(HistoryBuffer.Count() > SafeMaxHistoryCount)
+	{
+		HistoryBuffer.Pop();
+	}
+	return NewHistoryItem;
+}
+
+void UTurinmaGraphPanelBaseWidget::AddReferencedObjects(UObject* InThis, FReferenceCollector& Collector)
+{
+	UTurinmaGraphPanelBaseWidget* This = CastChecked<UTurinmaGraphPanelBaseWidget>(InThis);
+	for(int i = 0; i < This->HistoryBuffer.Count(); ++i)
+	{
+		auto&& Item = This->HistoryBuffer.PokeAtOffset(i);
+		Collector.AddReferencedObject(Item, This);
 	}
 }

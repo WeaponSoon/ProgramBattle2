@@ -212,3 +212,24 @@ public:
 
 	void InitData();
 };
+
+UCLASS(BlueprintType, Blueprintable)
+class TURINMALUA_API UTurinmaGraphPanelBaseWidget : public UUserWidget
+{
+	GENERATED_BODY()
+
+public:
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	TObjectPtr<UTurinmaProgram> EditingProgram;
+
+	int32 MaxHistoryCount = 10;
+
+	TResizableCircularQueue<UTurinmaProgram*> HistoryBuffer;
+
+	UTurinmaProgram* PushNewHistory();
+
+
+	static void AddReferencedObjects(UObject* InThis, FReferenceCollector& Collector);
+
+
+};

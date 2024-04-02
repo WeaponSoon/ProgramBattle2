@@ -698,6 +698,8 @@ struct TURINMALUA_API FTurinmaGraphData
 
 	TArray<FTurinmaNodeDataItem> NodeDatas;
 
+	void Init(UTurinmaProgram* Program);
+
 	bool Serialize(FArchive& Ar);
 
 	void AddStructReferencedObjects(class FReferenceCollector& Collector) const;
@@ -742,6 +744,8 @@ public:
 	UPROPERTY(Transient)
 	TMap<FName, int32> NameToGraph;
 
+	UFUNCTION(BlueprintCallable)
+	void CopyFrom(UTurinmaProgram* Other);
 
 #if WITH_EDITOR
 	UFUNCTION(CallInEditor)
@@ -759,6 +763,8 @@ public:
 	}
 #endif
 
+	virtual void PostDuplicate(EDuplicateMode::Type DuplicateMode) override;
+
 	virtual void PostLoad() override
 	{
 		Super::PostLoad();
@@ -766,6 +772,7 @@ public:
 		for(int32 I = 0; I < GraphDatas.Num(); ++I)
 		{
 			auto&& Item = GraphDatas[I];
+			Item.Init(this);
 			NameToGraph.Add(Item.GraphName, I);
 		}
 	}

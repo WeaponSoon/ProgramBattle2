@@ -376,6 +376,17 @@ HelloCoroutine hello() {
 }
 
 
+void FTurinmaGraphData::Init(UTurinmaProgram* Program)
+{
+	for(auto&& Item : NodeDatas)
+	{
+		if(Item.NodeType && Item.NodeData)
+		{
+			Item.NodeData->ProgramIn = Program;
+		}
+	}
+}
+
 bool FTurinmaGraphData::Serialize(FArchive& Ar)
 {
 
@@ -461,6 +472,30 @@ bool FTurinmaGraph::InitWithDataAndInfo(const FTurinmaGraphData& InData, const F
 	{
 		Nodes.Empty();
 		return false; //must have one input node
+	}
+}
+
+void UTurinmaProgram::CopyFrom(UTurinmaProgram* Other)
+{
+	if(Other && Other != this)
+	{
+		GraphDatas = Other->GraphDatas;
+		NameToGraph = Other->NameToGraph;
+		for (int32 I = 0; I < GraphDatas.Num(); ++I)
+		{
+			auto&& Item = GraphDatas[I];
+			Item.Init(this);
+		}
+	}
+}
+
+void UTurinmaProgram::PostDuplicate(EDuplicateMode::Type DuplicateMode)
+{
+	Super::PostDuplicate(DuplicateMode);
+	for (int32 I = 0; I < GraphDatas.Num(); ++I)
+	{
+		auto&& Item = GraphDatas[I];
+		Item.Init(this);
 	}
 }
 
