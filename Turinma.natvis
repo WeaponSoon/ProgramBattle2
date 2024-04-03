@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AutoVisualizer xmlns="http://schemas.microsoft.com/vstudio/debugger/natvis/2010">
+  <Type Name="TTurinmaCircularQueue&lt;*&gt;">
+    <DisplayString>{{ size={Tail - Head &gt;= 0 ? Tail - Head : Tail - Head + ArrayMax} }}</DisplayString>
+    <Expand>
+      <Item Name="[size]" ExcludeView="simple">Tail - Head &gt;= 0 ? Tail - Head : Tail - Head + ArrayMax</Item>
+      <Item Name="[capacity]" ExcludeView="simple">ArrayMax-1</Item>
+      <Item Name="[space]" ExcludeView="simple">ArrayMax</Item>
+      <CustomListItems MaxItemsPerView="5000" ExcludeView="Test">
+        <Variable Name="CurI" InitialValue="0" />
+        <Variable Name="MaxCount" InitialValue="Tail - Head &gt;= 0 ? Tail - Head : Tail - Head + ArrayMax" />
+        <Size>Tail - Head &gt;= 0 ? Tail - Head : Tail - Head + ArrayMax</Size>
+        <!--<Exec>pBucket = nullptr</Exec>-->
+        <Loop>
+          <If Condition="CurI &gt;= MaxCount">
+            <Break/>
+          </If>
+          <Item>InnerBuffer[(Head + CurI)%ArrayMax]</Item>
+          <Exec>CurI++</Exec>
+        </Loop>
+      </CustomListItems>
+    </Expand>
+  </Type>
+</AutoVisualizer>
+

@@ -185,9 +185,14 @@ public:
 		Other.InnerBuffer = static_cast<InElementType*>(FMemory::Malloc(Other.ArrayMax * sizeof(InElementType)));
 	}
 
-	TTurinmaCircularQueue operator=(const TTurinmaCircularQueue& InOther)
+	TTurinmaCircularQueue& operator=(const TTurinmaCircularQueue& InOther)
 	{
 		if(Tail >= Head)
+		{
+			return *this;
+		}
+
+		if (Tail >= Head)
 		{
 			DestroyCapacity(InnerBuffer + Head, GetCount());
 		}
@@ -216,8 +221,13 @@ public:
 		return *this;
 	}
 
-	TTurinmaCircularQueue operator=(TTurinmaCircularQueue&& Other) noexcept
+	TTurinmaCircularQueue& operator=(TTurinmaCircularQueue&& Other) noexcept
 	{
+		if(this == &Other)
+		{
+			return *this;
+		}
+
 		SizeType TempHead = Head;
 		SizeType TempTail = Tail;
 		SizeType TempArrayMax = ArrayMax;
