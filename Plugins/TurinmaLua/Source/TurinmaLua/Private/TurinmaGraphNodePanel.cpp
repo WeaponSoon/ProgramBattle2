@@ -132,39 +132,25 @@ void UTurinmaGraphNodeBaseWidget::InitData()
 	}
 }
 
-UTurinmaProgram* UTurinmaGraphPanelBaseWidget::PushNewHistory()
+void FTurinmaGraphDataRedoUndoItem::AddStructReferencedObjects(FReferenceCollector& Collector)
 {
-	if(!EditingProgram)
+	for (auto&& Item : History)
 	{
-		return nullptr;
+		Item.AddStructReferencedObjects(Collector);
 	}
-
-	
-	int32 SafeMaxHistoryCount = FMath::Max(1, MaxHistoryCount);
-
-	auto&& NewHistoryItem = HistoryBuffer.EnqueueDefaulted_GetRef();
-	NewHistoryItem = NewObject<UTurinmaProgram>(this);
-	if(HistoryBuffer.Count() > 1)
+	for (auto&& Item : UndoHistory)
 	{
-		NewHistoryItem->CopyFrom(HistoryBuffer.PokeAtOffset(HistoryBuffer.Count() - 2));
+		Item.AddStructReferencedObjects(Collector);
 	}
-	else
-	{
-		NewHistoryItem->CopyFrom(EditingProgram);
-	}
-	if(HistoryBuffer.Count() > SafeMaxHistoryCount)
-	{
-		HistoryBuffer.Pop();
-	}
-	return NewHistoryItem;
 }
+
 
 void UTurinmaGraphPanelBaseWidget::AddReferencedObjects(UObject* InThis, FReferenceCollector& Collector)
 {
-	UTurinmaGraphPanelBaseWidget* This = CastChecked<UTurinmaGraphPanelBaseWidget>(InThis);
+	/*UTurinmaGraphPanelBaseWidget* This = CastChecked<UTurinmaGraphPanelBaseWidget>(InThis);
 	for(int i = 0; i < This->HistoryBuffer.Count(); ++i)
 	{
 		auto&& Item = This->HistoryBuffer.PokeAtOffset(i);
 		Collector.AddReferencedObject(Item, This);
-	}
+	}*/
 }

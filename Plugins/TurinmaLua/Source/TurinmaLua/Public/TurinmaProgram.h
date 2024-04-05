@@ -634,10 +634,14 @@ struct TURINMALUA_API FTurinmaGraphData
 		FTurinmaNodeDataItem& operator=(FTurinmaNodeDataItem&& Other) noexcept
 		{
 			UE_LOG(LogTemp, Log, TEXT("SWP:Move Assignment"));
+
+			auto* TempNodeType = NodeType;
+			auto* TempNodeData = NodeData;
+
 			NodeType = Other.NodeType;
 			NodeData = Other.NodeData;
-			Other.NodeType = nullptr;
-			Other.NodeData = nullptr;
+			Other.NodeType = TempNodeType;
+			Other.NodeData = TempNodeData;
 			return *this;
 		}
 
@@ -765,16 +769,21 @@ public:
 
 	virtual void PostDuplicate(EDuplicateMode::Type DuplicateMode) override;
 
-	virtual void PostLoad() override
+	void RebuildNameToGraphIndex()
 	{
-		Super::PostLoad();
 		NameToGraph.Empty(GraphDatas.Num());
-		for(int32 I = 0; I < GraphDatas.Num(); ++I)
+		for (int32 I = 0; I < GraphDatas.Num(); ++I)
 		{
 			auto&& Item = GraphDatas[I];
 			Item.Init(this);
 			NameToGraph.Add(Item.GraphName, I);
 		}
+	}
+
+	virtual void PostLoad() override
+	{
+		Super::PostLoad();
+		RebuildNameToGraphIndex();
 	}
 };
 

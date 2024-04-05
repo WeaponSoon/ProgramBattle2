@@ -10,6 +10,7 @@
 #include "Components/EditableText.h"
 #include "Components/HorizontalBox.h"
 #include "Components/VerticalBox.h"
+#include "TurinmaCommon.h"
 #include "TurinmaGraphNodePanel.generated.h"
 
 
@@ -213,6 +214,125 @@ public:
 	void InitData();
 };
 
+USTRUCT()
+struct TURINMALUA_API FTurinmaGraphDataRedoUndoItem
+{
+	GENERATED_BODY()
+
+	TTurinmaCircularQueue<FTurinmaGraphData> History;
+	TTurinmaCircularQueue<FTurinmaGraphData> UndoHistory;
+
+	void AddStructReferencedObjects(class FReferenceCollector& Collector);
+};
+template<> struct TStructOpsTypeTraits<FTurinmaGraphDataRedoUndoItem> : public TStructOpsTypeTraitsBase2<FTurinmaGraphDataRedoUndoItem>
+{
+	enum { WithAddStructReferencedObjects = true };
+};
+
+USTRUCT()
+struct TURINMALUA_API FTurinmaGraphHistory
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	UTurinmaProgram* Program;
+
+	UPROPERTY()
+	TMap<FName, FTurinmaGraphDataRedoUndoItem> ModifiedTurinmaGraph;
+
+	FTurinmaGraphData* GetGraphDataByName(FName InName)
+	{
+		if(Program)
+		{
+			auto* ModifiedRes = ModifiedTurinmaGraph.Find(InName);
+			if(ModifiedRes && ModifiedRes->History.GetCount())
+			{
+				return ModifiedRes->History.PeekLast();
+			}
+			else
+			{
+				auto* Res = Program->GraphDatas.FindByPredicate([InName](const FTurinmaGraphData& InData)->bool {return InData.GraphName == InName; });
+				if(Res)
+				{
+					return Res;
+				}
+			}
+		}
+		return nullptr;
+	}
+	//create a new history node and return it to modify
+	FTurinmaGraphData* ModifyGraph(FName InName)
+	{
+		if (Program)
+		{
+			auto&& ModifyRes = ModifiedTurinmaGraph.FindOrAdd(InName);
+			ModifyRes.UndoHistory.Reset();
+			if (ModifyRes.History.GetCount())
+			{
+				return ModifyRes.History.Enqueue(*ModifyRes.History.PeekLast());
+			}
+			else
+			{
+				if (auto* Res = Program->GraphDatas.FindByPredicate([InName](const FTurinmaGraphData& InData)->bool {return InData.GraphName == InName; }))
+				{
+					return ModifyRes.History.Enqueue(*Res);
+				}
+			}
+		}
+		return nullptr;
+	}
+	FTurinmaGraphData* UndoGraph(FName InName)
+	{
+		if(Program)
+		{
+			auto* ModifiedRes = ModifiedTurinmaGraph.Find(InName);
+			if (ModifiedRes && ModifiedRes->History.GetCount())
+			{
+				ModifiedRes->UndoHistory.Enqueue(ModifiedRes->History.PopStack());
+			}
+			return GetGraphDataByName(InName);
+		}
+		return nullptr;
+	}
+	FTurinmaGraphData* RedoGraph(FName InName)
+	{
+		if (Program)
+		{
+			auto* ModifiedRes = ModifiedTurinmaGraph.Find(InName);
+			if (ModifiedRes && ModifiedRes->UndoHistory.GetCount())
+			{
+				ModifiedRes->History.Enqueue(ModifiedRes->UndoHistory.PopStack());
+			}
+			return GetGraphDataByName(InName);
+		}
+		return nullptr;
+	}
+
+	FTurinmaGraphData* ApplyGraph(FName InName)
+	{
+		if (Program)
+		{
+			auto* Res = Program->GraphDatas.FindByPredicate([InName](const FTurinmaGraphData& InData)->bool {return InData.GraphName == InName; });
+			
+			auto* ModifiedRes = ModifiedTurinmaGraph.Find(InName);
+			if (ModifiedRes && ModifiedRes->History.GetCount())
+			{
+				if (!Res)
+				{
+					Res = &Program->GraphDatas.AddDefaulted_GetRef();
+					Res->GraphName = InName;
+					Program->RebuildNameToGraphIndex();
+				}
+				*Res = *ModifiedRes->History.PeekLast();
+			}
+			return Res;
+		}
+		return nullptr;
+	}
+	
+};
+
+
 UCLASS(BlueprintType, Blueprintable)
 class TURINMALUA_API UTurinmaGraphPanelBaseWidget : public UUserWidget
 {
@@ -224,9 +344,11 @@ public:
 
 	int32 MaxHistoryCount = 10;
 
-	TResizableCircularQueue<UTurinmaProgram*> HistoryBuffer;
+	UPROPERTY(Transient)
+	FTurinmaGraphHistory HistoryBuffer;
 
-	UTurinmaProgram* PushNewHistory();
+
+	
 
 
 	static void AddReferencedObjects(UObject* InThis, FReferenceCollector& Collector);

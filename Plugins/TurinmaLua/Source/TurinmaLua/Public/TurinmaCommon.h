@@ -22,6 +22,71 @@ template <typename InElementType, typename SizeType = int32>
 class TTurinmaCircularQueue
 {
 public:
+
+	struct iterator
+	{
+		SizeType Pos = 0;
+		TTurinmaCircularQueue* Container = nullptr;
+		bool operator==(const iterator& Other) const
+		{
+			return Container == Other.Container && Pos == Other.Pos;
+		}
+		bool operator!=(const iterator& Other) const
+		{
+			return !(*this == Other);
+		}
+		InElementType& operator*() const
+		{
+			return (*Container)[Pos];
+		}
+		iterator& operator++()
+		{
+			++Pos;
+			return *this;
+		}
+	};
+
+	struct const_iterator
+	{
+		SizeType Pos = 0;
+		const TTurinmaCircularQueue* Container = nullptr;
+		bool operator==(const const_iterator& Other) const
+		{
+			return Container == Other.Container && Pos == Other.Pos;
+		}
+		bool operator!=(const const_iterator& Other) const
+		{
+			return !(*this == Other);
+		}
+		const InElementType& operator*() const
+		{
+			return (*Container)[Pos];
+		}
+		iterator& operator++()
+		{
+			++Pos;
+			return *this;
+		}
+	};
+
+	iterator begin()
+	{
+		return { 0, this };
+	}
+	const_iterator begin() const
+	{
+		return { 0, this };
+	}
+	iterator end()
+	{
+		return { GetCount(), this };
+	}
+	const_iterator end() const
+	{
+		return { GetCount(), this };
+	}
+
+
 	static constexpr SizeType DEFAULT_CAPACITY = 4;
 	static constexpr int32 RESIZE_FACTOR = 2;
 private:
@@ -299,6 +364,18 @@ public:
 		return nullptr;
 	}
 
+	InElementType& operator[](SizeType InIndex)
+	{
+		check(InIndex < GetCount())
+		return *(InnerBuffer + (Head + InIndex) % ArrayMax);
+	}
+
+	const InElementType& operator[](SizeType InIndex) const
+	{
+		check(InIndex < GetCount())
+		return *(InnerBuffer + (Head + InIndex) % ArrayMax);
+	}
+
 	bool PopQueueNoRet()
 	{
 		if(GetCount())
@@ -350,6 +427,27 @@ public:
 		return Ret;
 	}
 
+
+	void Reset(SizeType NewArrayMax = 0)
+	{
+		if (Tail >= Head)
+		{
+			DestroyCapacity(InnerBuffer + Head, GetCount());
+		}
+		else
+		{
+			DestroyCapacity(InnerBuffer + Head, ArrayMax - Head);
+			DestroyCapacity(InnerBuffer, Tail);
+		}
+		Tail = 0;
+		Head = 0;
+		if(NewArrayMax >= DEFAULT_CAPACITY)
+		{
+			ArrayMax = NewArrayMax;
+			FMemory::Free(InnerBuffer);
+			InnerBuffer = static_cast<InElementType*>(FMemory::Malloc(ArrayMax * sizeof(InElementType)));
+		}
+	}
 
 	SizeType GetCount() const { return Tail - Head >= 0 ? Tail - Head : Tail - Head + ArrayMax; }
 	SizeType GetCapacity() const { return ArrayMax - 1; }
