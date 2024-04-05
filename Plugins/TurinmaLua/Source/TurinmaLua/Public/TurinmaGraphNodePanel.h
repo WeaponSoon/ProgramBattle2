@@ -101,7 +101,7 @@ struct TURINMALUA_API FTurinmaGraphItem
 	UTurinmaProgram* Program = nullptr;
 
 	UPROPERTY(EditAnywhere)
-	int32 GraphIndex = INDEX_NONE;
+	FName GraphName = NAME_None;
 
 	FTurinmaGraphData* GetGraphData()
 	{
@@ -109,11 +109,11 @@ struct TURINMALUA_API FTurinmaGraphItem
 		{
 			return nullptr;
 		}
-		if(Program->GraphDatas.IsValidIndex(GraphIndex))
-		{
-			return &Program->GraphDatas[GraphIndex];
-		}
-		return nullptr;
+		return Program->GraphDatas.FindByPredicate(
+			[this](const FTurinmaGraphData& Data)->bool
+			{
+				return Data.GraphName == GraphName;
+			});
 	}
 };
 
@@ -154,6 +154,7 @@ class TURINMALUA_API UTurinmaGraphNodeBaseWidget : public UUserWidget
 
 	TSharedPtr<STurinmaGraphNodeSlate> MySlate;
 
+public:
 	UPROPERTY(EditAnywhere, Category = Data)
 	FTurinmaGraphNodeItem NodeItem;
 
@@ -214,6 +215,55 @@ public:
 	void InitData();
 };
 
+UCLASS(BlueprintType)
+class TURINMALUA_API UTurinmaGraphNodeWidgetRegister : public UDataAsset
+{
+	GENERATED_BODY()
+public:
+	UPROPERTY(EditAnywhere, BlueprintReadOnly)
+	TMap<FName, TSubclassOf<UTurinmaGraphNodeBaseWidget>> NodeTypeToWidgetType;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly)
+	TSubclassOf<UTurinmaGraphNodeBaseWidget> DefaultNodeWidgetType;
+
+	UFUNCTION(BlueprintCallable)
+	static TSubclassOf<UTurinmaGraphNodeBaseWidget> GetVeryDefaultGraphNodeWidget()
+	{
+		UClass* FinalRet = LoadClass<UTurinmaGraphNodeBaseWidget>(nullptr,
+			TEXT("/Script/CoreUObject.Class'/TurinmaLua/TurinmaNodeWidgets/Default/DefaultTurinmaGraphNodeWidget.DefaultTurinmaGraphNodeWidget_C'")
+		);
+		return FinalRet;
+	}
+
+
+
+	UFUNCTION(BlueprintCallable)
+	TSubclassOf<UTurinmaGraphNodeBaseWidget> ResolveWidgetType(FName InName)
+	{
+		auto* Res = NodeTypeToWidgetType.Find(InName);
+		if(Res)
+		{
+			return *Res;
+		}
+		if(DefaultNodeWidgetType)
+		{
+			return DefaultNodeWidgetType;
+		}
+		return GetVeryDefaultGraphNodeWidget();
+	}
+	UFUNCTION(BlueprintCallable)
+	TSubclassOf<UTurinmaGraphNodeBaseWidget> ResolveWidgetTypeByClass(UScriptStruct* InNodeType)
+	{
+		if(InNodeType && InNodeType->IsChildOf(FTurinmaGraphNodeDataBase::StaticStruct()))
+		{
+			FName PathName = *InNodeType->GetPathName();
+			return ResolveWidgetType(PathName);
+		}
+		return nullptr;
+	}
+};
+
+
 USTRUCT()
 struct TURINMALUA_API FTurinmaGraphDataRedoUndoItem
 {
@@ -235,7 +285,7 @@ struct TURINMALUA_API FTurinmaGraphHistory
 	GENERATED_BODY()
 
 	UPROPERTY()
-	UTurinmaProgram* Program;
+	UTurinmaProgram* Program = nullptr;
 
 	UPROPERTY()
 	TMap<FName, FTurinmaGraphDataRedoUndoItem> ModifiedTurinmaGraph;
@@ -339,13 +389,42 @@ class TURINMALUA_API UTurinmaGraphPanelBaseWidget : public UUserWidget
 	GENERATED_BODY()
 
 public:
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	TObjectPtr<UTurinmaProgram> EditingProgram;
 
-	int32 MaxHistoryCount = 10;
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, meta = (BindWidget))
+	TObjectPtr<UCanvasPanel> GraphPanel = nullptr;
+
+	UPROPERTY()
+	TMap<int32, TObjectPtr<UTurinmaGraphNodeBaseWidget>> NodeWidgets;
+	UPROPERTY()
+	FName CurrentPanelName;
+
+	UTurinmaGraphPanelBaseWidget(const FObjectInitializer& ObjectInitializer);
 
 	UPROPERTY(Transient)
 	FTurinmaGraphHistory HistoryBuffer;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	TObjectPtr<UTurinmaProgram> EditingProgram;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	int32 MaxHistoryCount = 10;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly)
+	TObjectPtr<UTurinmaGraphNodeWidgetRegister> GraphNodeDataToGraphNodeWidgetType;
+
+
+	UFUNCTION(BlueprintCallable)
+	void ResetGraphPanel()
+	{
+		GraphPanel->ClearChildren();
+		NodeWidgets.Empty();
+		CurrentPanelName = NAME_None;
+	}
+
+	UFUNCTION(BlueprintCallable)
+	void BuildGraphPanel(FName InName);
+
+
 
 
 	

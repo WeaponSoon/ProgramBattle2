@@ -2,6 +2,7 @@
 
 #include "MotionDelayBuffer.h"
 #include "Blueprint/WidgetTree.h"
+#include "Components/CanvasPanelSlot.h"
 
 bool UTurinmaGraphNodeBaseWidget::Initialize()
 {
@@ -144,6 +145,49 @@ void FTurinmaGraphDataRedoUndoItem::AddStructReferencedObjects(FReferenceCollect
 	}
 }
 
+
+UTurinmaGraphPanelBaseWidget::UTurinmaGraphPanelBaseWidget(const FObjectInitializer& ObjectInitializer) : Super(ObjectInitializer)
+{
+	static ConstructorHelpers::FObjectFinder<UTurinmaGraphNodeWidgetRegister>
+		R(TEXT("/Script/TurinmaLua.TurinmaGraphNodeWidgetRegister'/TurinmaLua/TurinmaNodeWidgets/DefaultTurinmaGraphNodeWidgetRegister.DefaultTurinmaGraphNodeWidgetRegister'"));
+	if(R.Succeeded())
+	{
+		GraphNodeDataToGraphNodeWidgetType = R.Object;
+	}
+}
+
+void UTurinmaGraphPanelBaseWidget::BuildGraphPanel(FName InName)
+{
+	ResetGraphPanel();
+
+	auto* CurGraphData = HistoryBuffer.GetGraphDataByName(InName);
+	if(CurGraphData)
+	{
+		CurrentPanelName = InName;
+
+		auto&& NodeDatas = CurGraphData->NodeDatas;
+		for(int32 NodeIndex = 0; NodeIndex < NodeDatas.Num(); ++NodeIndex)
+		{
+			auto&& NodeData = NodeDatas[NodeIndex];
+			if(NodeData.IsValid())
+			{
+				auto&& NodeWidgetType = GraphNodeDataToGraphNodeWidgetType->ResolveWidgetTypeByClass(NodeData.NodeType);
+				UTurinmaGraphNodeBaseWidget* NodeW = CreateWidget<UTurinmaGraphNodeBaseWidget>(this, NodeWidgetType, NodeData.NodeData->GetNodeName());
+				NodeW->NodeItem.NodeIndex = NodeIndex;
+				NodeW->NodeItem.Graph.Program = HistoryBuffer.Program;
+				NodeW->NodeItem.Graph.GraphName = InName;
+				UCanvasPanelSlot* SlotW = GraphPanel->AddChildToCanvas(NodeW);
+				NodeWidgets.Add(NodeIndex, NodeW);
+				SlotW->SetAlignment(FVector2D(0.5f, 0.5f));
+				SlotW->SetAnchors(FAnchors(0.5f, 0.5f, 0.5f, 0.5f));
+				SlotW->SetPosition(NodeData.NodeData->Location);
+				SlotW->SetSize(NodeData.NodeData->Size);
+				
+			}
+		}
+		//todo link them all
+	}
+}
 
 void UTurinmaGraphPanelBaseWidget::AddReferencedObjects(UObject* InThis, FReferenceCollector& Collector)
 {

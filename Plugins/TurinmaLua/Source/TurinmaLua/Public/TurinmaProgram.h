@@ -274,6 +274,8 @@ struct TURINMALUA_API FTurinmaGraphNodeDataBase
 	bool IsPure = false;
 	UPROPERTY(EditAnywhere)
 	FVector2D Location;
+	UPROPERTY(EditAnywhere)
+	FVector2D Size = FVector2D(200, 160);
 	UPROPERTY(VisibleAnywhere)
 	TArray<FTurinmaGraphNodeLinkInfo> NextNodes;
 	UPROPERTY(VisibleAnywhere)
@@ -571,6 +573,63 @@ struct TURINMALUA_API FTurinmaGraphData
 		UScriptStruct* NodeType = nullptr;
 		FTurinmaGraphNodeDataBase* NodeData = nullptr;
 
+		bool IsValid() const
+		{
+			return !!NodeType && !!NodeData;
+		}
+
+		void Reset()
+		{
+			if (NodeType && NodeData)
+			{
+				NodeType->DestroyStruct(NodeData->GetThisPtr());
+				FMemory::Free(NodeData);
+			}
+			NodeType = nullptr;
+			NodeData = nullptr;
+		}
+
+		template<typename T>
+		void SetData(const T& Data)
+		{
+			static_assert(std::is_base_of<FTurinmaGraphNodeDataBase, T>::value, "error");
+			SetData(T::StaticStruct(), &Data);
+		}
+
+		void SetData(UScriptStruct* Type, void* Data)
+		{
+			if(Type == nullptr || !Type->IsChildOf(FTurinmaGraphNodeDataBase::StaticStruct()))
+			{
+				Reset();
+				return;
+			}
+			if(Type != NodeType)
+			{
+				Reset();
+
+				NodeType = Type;
+				NodeData = (FTurinmaGraphNodeDataBase*)FMemory::Malloc(NodeType->GetStructureSize());
+				NodeType->InitializeStruct(NodeData);
+				if(Data)
+				{
+					NodeType->CopyScriptStruct(NodeData, Data);
+				}
+			}
+			else
+			{
+				if(!NodeData)
+				{
+					NodeData = (FTurinmaGraphNodeDataBase*)FMemory::Malloc(NodeType->GetStructureSize());
+					NodeType->InitializeStruct(NodeData);
+				}
+				if(Data)
+				{
+					NodeType->CopyScriptStruct(NodeData, Data);
+				}
+			}
+			
+		}
+
 		void AddReferencedObjects(FReferenceCollector& Collector)
 		{
 			if(NodeType)
@@ -589,11 +648,14 @@ struct TURINMALUA_API FTurinmaGraphData
 		FTurinmaNodeDataItem(const FTurinmaNodeDataItem& Other) : NodeType(Other.NodeType)
 		{
 			UE_LOG(LogTemp, Log, TEXT("SWP:Copy Constructor"));
-			if(NodeType && Other.NodeData)
+			if(NodeType)
 			{
 				void* Data = FMemory::Malloc(NodeType->GetStructureSize());
 				NodeType->InitializeStruct(Data);
-				NodeType->CopyScriptStruct(Data, Other.NodeData);
+				if(Other.NodeData)
+				{
+					NodeType->CopyScriptStruct(Data, Other.NodeData);
+				}
 				NodeData = static_cast<FTurinmaGraphNodeDataBase*>(Data);
 			}
 		}
@@ -620,14 +682,9 @@ struct TURINMALUA_API FTurinmaGraphData
 		FTurinmaNodeDataItem& operator=(const FTurinmaNodeDataItem& Other)
 		{
 			UE_LOG(LogTemp, Log, TEXT("SWP:Copy Assignment"));
-			NodeType = Other.NodeType;
-			if (NodeType && Other.NodeData)
-			{
-				void* Data = FMemory::Malloc(NodeType->GetStructureSize());
-				NodeType->InitializeStruct(Data);
-				NodeType->CopyScriptStruct(Data, Other.NodeData);
-				NodeData = static_cast<FTurinmaGraphNodeDataBase*>(Data);
-			}
+
+			SetData(Other.NodeType, Other.NodeData);
+
 			return *this;
 		}
 
