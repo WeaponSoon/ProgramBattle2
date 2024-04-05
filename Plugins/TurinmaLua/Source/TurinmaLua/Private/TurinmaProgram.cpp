@@ -220,6 +220,7 @@ TSharedPtr<struct FTurinmaGraphNodeBase> FTurinmaGraphNodeDataTest::CreateNode(c
 	auto S = MakeShared<FTurinmaGraphNodeTest>();
 	S->DataIndex = CreateInfo.DataIndex;
 	S->NodeIndex = CreateInfo.NodeIndex;
+	S->bIsPure = IsPure;
 	return S;
 }
 
@@ -230,6 +231,7 @@ TSharedPtr<struct FTurinmaGraphNodeBase> FTurinmaGraphInputNodeData::CreateNode(
 	auto S = MakeShared<FTurinmaGraphInputNode>();
 	S->DataIndex = CreateInfo.DataIndex;
 	S->NodeIndex = CreateInfo.NodeIndex;
+	S->bIsPure = IsPure;
 	return S;
 }
 
@@ -240,6 +242,10 @@ bool FTurinmaGraphInputNode::Execute(const FTurinmaNodeExecuteParam& ExecutePara
 	auto&& CallItem = ExecuteParam.Process->CallInfos[ExecuteParam.CurCallInfo].CallStack[ExecuteParam.CurCallItem];
 	auto&& NodeItem = CallItem.LocalNodeIndex[ExecuteParam.MyIndex];
 	NodeItem.NodeOutput = CallItem.GraphInputValue;
+	if(!bIsPure)
+	{
+		NodeItem.WhichNextToGo = 0;
+	}
 	return true;
 }
 
@@ -248,6 +254,7 @@ TSharedPtr<FTurinmaGraphNodeBase> FTurinmaGraphOutputNodeData::CreateNode(const 
 	auto S = MakeShared<FTurinmaGraphOutputNode>();
 	S->DataIndex = CreateInfo.DataIndex;
 	S->NodeIndex = CreateInfo.NodeIndex;
+	S->bIsPure = IsPure;
 	return S;
 }
 
@@ -267,6 +274,7 @@ TSharedPtr<FTurinmaGraphNodeBase> FTurinmaCallGraphNodeData::CreateNode(const FT
 	S->DataIndex = CreateInfo.DataIndex;
 	S->NodeIndex = CreateInfo.NodeIndex;
 	S->GraphName = GraphName;
+	S->bIsPure = IsPure;
 	return S;
 }
 
@@ -317,12 +325,17 @@ bool FTurinmaCallGraphNode::Execute(const FTurinmaNodeExecuteParam& ExecuteParam
 
 	if(Res)
 	{
+		if (!bIsPure)
+		{
+			NodeItem.WhichNextToGo = 0;
+		}
 		bool JunpSuc = ExecuteParam.Process->LongJmp(CallInfo, *Res);
 		if(JunpSuc)
 		{
 			auto&& NewCallItem = CallInfo.CallStack.Last();
 			NewCallItem.GraphInputValue = NodeInput;
 			NewCallItem.JumpIntoNodeIndex = NodeIndex;
+
 			return true;
 		}
 		return false;
@@ -336,6 +349,7 @@ TSharedPtr<FTurinmaGraphNodeBase> FTurinmaLexicalIntGraphNodeData::CreateNode(co
 	S->DataIndex = CreateInfo.DataIndex;
 	S->NodeIndex = CreateInfo.NodeIndex;
 	S->LexicalInt = LexicalInt;
+	S->bIsPure = IsPure;
 	return S;
 }
 
@@ -358,7 +372,10 @@ bool FTurinmaLexicalIntGraphNode::Execute(const FTurinmaNodeExecuteParam& Execut
 	auto&& Ret = NodeItem.NodeOutput.AddDefaulted_GetRef();
 	Ret.ValueType = ETurinmaValueType::Int;
 	Ret.IntValue = LexicalInt;
-
+	if (!bIsPure)
+	{
+		NodeItem.WhichNextToGo = 0;
+	}
 	return true;
 }
 
@@ -792,7 +809,10 @@ bool FTurinmaProcess::Return()
 			auto GraphOutput = CallInfo.CallStack.Last().GraphOutputValue;
 
 			CallInfo.CallStack.Pop();
-			CallInfo.CallStack.Last().TempLocalVariables.FindOrAdd(JumpIntoNodeIndex) = GraphOutput;
+			if(CallInfo.CallStack.Num() > 0)
+			{
+				CallInfo.CallStack.Last().TempLocalVariables.FindOrAdd(JumpIntoNodeIndex) = GraphOutput;
+			}
 			return true;
 		}
 	}
@@ -953,8 +973,11 @@ FTurinmaCoroutine FTurinmaProcess::Execute()
 							}
 							else
 							{
-								RecordError(FTurinmaErrorContent());
-								break;
+								CallItem.LocalNodeIndex.RemoveAt(CallItem.LocalNodeIndex.Num() - 1);
+								if (CallItem.LocalNodeIndex.Num() == 0)
+								{
+									Return();
+								}
 							}
 						}
 						else

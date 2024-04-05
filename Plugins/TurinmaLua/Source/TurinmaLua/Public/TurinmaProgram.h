@@ -380,7 +380,7 @@ struct TURINMALUA_API FTurinmaGraphNodeBase : TSharedFromThis<FTurinmaGraphNodeB
 protected:
 	FORCENOINLINE static int64 GraphNodeTypeId();
 public:
-
+	bool bIsPure = false;
 	int32 DataIndex = INDEX_NONE;
 	int32 NodeIndex = INDEX_NONE;
 	
