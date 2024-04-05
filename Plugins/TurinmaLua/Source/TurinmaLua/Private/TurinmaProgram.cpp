@@ -330,6 +330,38 @@ bool FTurinmaCallGraphNode::Execute(const FTurinmaNodeExecuteParam& ExecuteParam
 	return false;
 }
 
+TSharedPtr<FTurinmaGraphNodeBase> FTurinmaLexicalIntGraphNodeData::CreateNode(const FTurinmaNodeCreateInfo& CreateInfo)
+{
+	auto S = MakeShared<FTurinmaLexicalIntGraphNode>();
+	S->DataIndex = CreateInfo.DataIndex;
+	S->NodeIndex = CreateInfo.NodeIndex;
+	S->LexicalInt = LexicalInt;
+	return S;
+}
+
+TArray<FTurinmaGraphNodeParamDescInfo> FTurinmaLexicalIntGraphNodeData::GetOutputParamDescs() const
+{
+	FTurinmaGraphNodeParamDescInfo Info;
+	Info.ValueType = ETurinmaValueType::Int;
+	Info.ParamName = TEXT("Value");
+	return { Info };
+}
+
+DEFINE_TURINMA_GRAPH_NODE(FTurinmaLexicalIntGraphNode)
+
+bool FTurinmaLexicalIntGraphNode::Execute(const FTurinmaNodeExecuteParam& ExecuteParam)
+{
+	auto&& CallInfo = ExecuteParam.Process->CallInfos[ExecuteParam.CurCallInfo];
+	auto&& CallItem = CallInfo.CallStack[ExecuteParam.CurCallItem];
+	auto&& NodeItem = CallItem.LocalNodeIndex[ExecuteParam.MyIndex];
+
+	auto&& Ret = NodeItem.NodeOutput.AddDefaulted_GetRef();
+	Ret.ValueType = ETurinmaValueType::Int;
+	Ret.IntValue = LexicalInt;
+
+	return true;
+}
+
 UE_DISABLE_OPTIMIZATION
 
 
@@ -378,11 +410,31 @@ HelloCoroutine hello() {
 
 void FTurinmaGraphData::Init(UTurinmaProgram* Program)
 {
-	for(auto&& Item : NodeDatas)
+	for(int32 NodeDataIndex = 0; NodeDataIndex < NodeDatas.Num(); ++NodeDataIndex)
 	{
+		auto&& Item = NodeDatas[NodeDataIndex];
 		if(Item.NodeType && Item.NodeData)
 		{
 			Item.NodeData->ProgramIn = Program;
+		}
+	}
+	StartNodeIndex = INDEX_NONE;
+	EndNodeIndex = INDEX_NONE;
+	InitInoutPut();
+}
+
+void FTurinmaGraphData::InitInoutPut()
+{
+	for (int32 NodeDataIndex = 0; NodeDataIndex < NodeDatas.Num(); ++NodeDataIndex)
+	{
+		auto&& Item = NodeDatas[NodeDataIndex];
+		if (StartNodeIndex == INDEX_NONE && Item.NodeType == FTurinmaGraphInputNodeData::StaticStruct())
+		{
+			StartNodeIndex = NodeDataIndex;
+		}
+		if (EndNodeIndex == INDEX_NONE && Item.NodeType == FTurinmaGraphOutputNodeData::StaticStruct())
+		{
+			EndNodeIndex = NodeDataIndex;
 		}
 	}
 }
@@ -416,15 +468,10 @@ bool FTurinmaGraphData::Serialize(FArchive& Ar)
 		for (int i = 0; i < NumOfNode; ++i)
 		{
 			NodeDatas[i].Serialize(Ar);
-			if (NodeDatas[i].NodeType == FTurinmaGraphInputNodeData::StaticStruct())
-			{
-				StartNodeIndex = i;
-			}
-			if (NodeDatas[i].NodeType == FTurinmaGraphOutputNodeData::StaticStruct())
-			{
-				EndNodeIndex = i;
-			}
 		}
+		StartNodeIndex = INDEX_NONE;
+		EndNodeIndex = INDEX_NONE;
+		InitInoutPut();
 	}
 	return true;
 }
@@ -481,22 +528,84 @@ void UTurinmaProgram::CopyFrom(UTurinmaProgram* Other)
 	{
 		GraphDatas = Other->GraphDatas;
 		NameToGraph = Other->NameToGraph;
-		for (int32 I = 0; I < GraphDatas.Num(); ++I)
-		{
-			auto&& Item = GraphDatas[I];
-			Item.Init(this);
-		}
+		RebuildNameToGraphIndex();
 	}
 }
 
-void UTurinmaProgram::PostDuplicate(EDuplicateMode::Type DuplicateMode)
+void UTurinmaProgram::InitAllGraphDatas()
 {
-	Super::PostDuplicate(DuplicateMode);
 	for (int32 I = 0; I < GraphDatas.Num(); ++I)
 	{
 		auto&& Item = GraphDatas[I];
 		Item.Init(this);
 	}
+}
+
+#if WITH_EDITOR
+UTurinmaProgram* UTurinmaProgram::GenerateTestTurinmaProgram()
+{
+	UTurinmaProgram* Ret = NewObject<UTurinmaProgram>();
+	{
+		auto&& Graph0 = Ret->GraphDatas.AddDefaulted_GetRef();
+		Graph0.GraphName = TEXT("Graph0");
+		auto&& Graph0Begin = Graph0.NodeDatas.AddDefaulted_GetRef();
+
+		FTurinmaGraphInputNodeData Input;
+		auto&& Param = Input.OutputParamDesc.AddDefaulted_GetRef();
+		Param.ValueType = ETurinmaValueType::Int;
+		Param.ParamName = TEXT("Test");
+		Graph0Begin.SetData(Input);
+	}
+	{
+		auto&& GraphMain = Ret->GraphDatas.AddDefaulted_GetRef();
+		GraphMain.GraphName = TEXT("Main");
+		auto&& GraphMainBegin = GraphMain.NodeDatas.AddDefaulted_GetRef();
+		GraphMainBegin.SetData(FTurinmaGraphInputNodeData());
+		
+		FTurinmaCallGraphNodeData CallNode;
+		CallNode.GraphName = TEXT("Graph0");
+		auto&& GraphMainCallGraph0Node = GraphMain.NodeDatas.AddDefaulted_GetRef();
+		int32 CallNodeIndex = GraphMain.NodeDatas.Num() - 1;
+		GraphMainCallGraph0Node.SetData(CallNode);
+
+		auto&& GraphMainLexicalIntNode = GraphMain.NodeDatas.AddDefaulted_GetRef();
+		int32 LexicalIntIndex = GraphMain.NodeDatas.Num() - 1;
+		FTurinmaLexicalIntGraphNodeData LexicalInt;
+		LexicalInt.LexicalInt = 100;
+		LexicalInt.IsPure = true;
+		GraphMainLexicalIntNode.SetData(LexicalInt);
+
+
+
+		auto&& LinkToCallGraph0 = GraphMainBegin.NodeData->NextNodes.AddDefaulted_GetRef();
+		LinkToCallGraph0.NextNode = CallNodeIndex;
+
+		auto&& ParamLinkToCall = GraphMainCallGraph0Node.NodeData->InputParams.AddDefaulted_GetRef();
+		ParamLinkToCall.ParamNode = LexicalIntIndex;
+		ParamLinkToCall.ParamPin = 0;
+	}
+	
+	
+	Ret->RebuildNameToGraphIndex();
+	return Ret;
+}
+
+void UTurinmaProgram::TestRun(UTurinmaProgram* InProgram)
+{
+	FTurinmaProcess Process;
+	Process.Program = InProgram;
+	Process.Start();
+	while(Process.IsRunning())
+	{
+		Process.Tick();
+	}
+}
+#endif
+
+void UTurinmaProgram::PostDuplicate(EDuplicateMode::Type DuplicateMode)
+{
+	Super::PostDuplicate(DuplicateMode);
+	RebuildNameToGraphIndex();
 }
 
 //bool FTurinmaProcessCallInfoItem::LocalJmp(int32 NodeIndex)

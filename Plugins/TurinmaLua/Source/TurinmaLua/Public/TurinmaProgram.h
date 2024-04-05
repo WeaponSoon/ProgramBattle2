@@ -221,7 +221,7 @@ struct FTurinmaGraphNodeParamDescInfo
 		Max,
 		Last = Max - 1
 	};
-	FTurinmaGraphParamDescVersion Version;
+	FTurinmaGraphParamDescVersion Version = FTurinmaGraphParamDescVersion::Last;
 	ETurinmaValueType ValueType;
 	FName ExtraTypeInfo;
 	FName ParamName;
@@ -288,7 +288,7 @@ struct TURINMALUA_API FTurinmaGraphNodeDataBase
 
 	virtual bool IsInputMatch() const
 	{
-		auto&& InputParamDescs = GetOutputParamDescs();
+		auto&& InputParamDescs = GetInputParamDescs();
 		return InputParamDescs.Num() == InputParams.Num();
 	}
 	virtual bool CanModifyInputParamsDesc() const
@@ -536,6 +536,34 @@ struct FTurinmaCallGraphNode : FTurinmaGraphNodeBase
 };
 
 
+USTRUCT()
+struct FTurinmaLexicalIntGraphNodeData : public FTurinmaGraphNodeDataBase
+{
+	GENERATED_BODY()
+
+	DECLARE_TURINMA_GRAPH_NODE_DATA(FTurinmaLexicalIntGraphNodeData)
+
+	UPROPERTY()
+	int64 LexicalInt;
+
+
+
+	virtual TSharedPtr<struct FTurinmaGraphNodeBase> CreateNode(const FTurinmaNodeCreateInfo& CreateInfo) override;
+	virtual TArray<FTurinmaGraphNodeParamDescInfo> GetOutputParamDescs() const override;
+
+};
+
+struct FTurinmaLexicalIntGraphNode : FTurinmaGraphNodeBase
+{
+	DECLARE_TURINMA_GRAPH_NODE(FTurinmaLexicalIntGraphNode)
+
+	int64 LexicalInt;
+	virtual bool Execute(const FTurinmaNodeExecuteParam& ExecuteParam) override;
+};
+
+
+
+
 USTRUCT(BlueprintType)
 struct TURINMALUA_API FTurinmaGraphData
 {
@@ -596,7 +624,7 @@ struct TURINMALUA_API FTurinmaGraphData
 			SetData(T::StaticStruct(), &Data);
 		}
 
-		void SetData(UScriptStruct* Type, void* Data)
+		void SetData(UScriptStruct* Type, const void* Data)
 		{
 			if(Type == nullptr || !Type->IsChildOf(FTurinmaGraphNodeDataBase::StaticStruct()))
 			{
@@ -761,6 +789,8 @@ struct TURINMALUA_API FTurinmaGraphData
 
 	void Init(UTurinmaProgram* Program);
 
+	void InitInoutPut();
+
 	bool Serialize(FArchive& Ar);
 
 	void AddStructReferencedObjects(class FReferenceCollector& Collector) const;
@@ -808,6 +838,9 @@ public:
 	UFUNCTION(BlueprintCallable)
 	void CopyFrom(UTurinmaProgram* Other);
 
+	UFUNCTION(BlueprintCallable)
+	void InitAllGraphDatas();
+
 #if WITH_EDITOR
 	UFUNCTION(CallInEditor)
 	void Test_AddSomeNodeInGraph()
@@ -822,6 +855,15 @@ public:
 			NodeData->InputParams.AddDefaulted_GetRef().ParamPin = 100;
 		}
 	}
+
+	UFUNCTION(BlueprintCallable)
+	static UTurinmaProgram* GenerateTestTurinmaProgram();
+
+	UFUNCTION(BlueprintCallable)
+	static void TestRun(UTurinmaProgram* InProgram);
+
+	
+
 #endif
 
 	virtual void PostDuplicate(EDuplicateMode::Type DuplicateMode) override;
@@ -832,9 +874,9 @@ public:
 		for (int32 I = 0; I < GraphDatas.Num(); ++I)
 		{
 			auto&& Item = GraphDatas[I];
-			Item.Init(this);
 			NameToGraph.Add(Item.GraphName, I);
 		}
+		InitAllGraphDatas();
 	}
 
 	virtual void PostLoad() override
