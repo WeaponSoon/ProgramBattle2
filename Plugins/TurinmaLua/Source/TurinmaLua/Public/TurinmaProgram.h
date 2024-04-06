@@ -3,6 +3,7 @@
 #include <coroutine>
 #include <map>
 #include "CoreMinimal.h"
+#include "TurinmaCommon.h"
 #include "Engine/DataAsset.h"
 #include "TurinmaProgram.generated.h"
 #if !UE_BUILD_SHIPPING && !UE_BUILD_TEST
@@ -56,6 +57,16 @@ struct FTurinmaValue
 		return Equals(Other);
 	}
 
+	
+	FString ToLexicalString() const;
+	FTurinmaValue ToString() const
+	{
+		FTurinmaValue Ret;
+		Ret.ValueType = ETurinmaValueType::String;
+		Ret.StringValue = ToLexicalString();
+		return Ret;
+		
+	}
 };
 
 inline uint32 GetTypeHash(const FTurinmaValue& Id)
@@ -101,6 +112,8 @@ struct FTurinmaHeapValue : TSharedFromThis<FTurinmaHeapValue>
 	virtual EHeapValueKind GetHeapValueKind() const { return EHeapValueKind::None; }
 
 	static EHeapValueKind StaticHeapValueKind() { return EHeapValueKind::None; }
+
+	virtual FString ToLexicalString() const { return TEXT(""); }
 
 	virtual uint32 GetHash() const { return 0; }
 	virtual bool Equals(const FTurinmaHeapValue& Other) const { return false; }
@@ -562,6 +575,26 @@ struct FTurinmaLexicalIntGraphNode : FTurinmaGraphNodeBase
 };
 
 
+USTRUCT()
+struct FTurinmaOutputLogGraphNodeData : public FTurinmaGraphNodeDataBase
+{
+	GENERATED_BODY()
+
+	DECLARE_TURINMA_GRAPH_NODE_DATA(FTurinmaOutputLogGraphNodeData)
+
+	virtual TSharedPtr<struct FTurinmaGraphNodeBase> CreateNode(const FTurinmaNodeCreateInfo& CreateInfo) override;
+	virtual TArray<FTurinmaGraphNodeParamDescInfo> GetInputParamDescs() const override;
+
+};
+
+struct FTurinmaOutputLogGraphNode : FTurinmaGraphNodeBase
+{
+	DECLARE_TURINMA_GRAPH_NODE(FTurinmaOutputLogGraphNode)
+
+	virtual bool Execute(const FTurinmaNodeExecuteParam& ExecuteParam) override;
+};
+
+
 
 
 USTRUCT(BlueprintType)
@@ -861,9 +894,8 @@ public:
 
 	UFUNCTION(BlueprintCallable)
 	static void TestRun(UTurinmaProgram* InProgram);
-
-	
-
+	UFUNCTION(BlueprintCallable)
+	static void TestStop();
 #endif
 
 	virtual void PostDuplicate(EDuplicateMode::Type DuplicateMode) override;
@@ -953,7 +985,7 @@ struct FTurinmaCoroutine {
 		}
 		std::suspend_always initial_suspend() { return {}; }//协程创建之后，协程函数体执行之前的时候执行此函数，等同于co_await initial_suspend();这里返回suspend_always
 		//表示创建调用函数创建协程对象后立马返回，不执行协程函数真正的函数体，知道外面调用resume
-		std::suspend_never final_suspend() noexcept;
+		std::suspend_always final_suspend() noexcept;
 		
 
 		// 协程函数要返回某种类型的值的话（即co_return XXX），
@@ -980,8 +1012,31 @@ private:
 	
 };
 
+struct TURINMALUA_API FTurinmaProcessConsoleItem
+{
+	FString Log;
+};
 
+class TURINMALUA_API FTurinmaProcessConsole
+{
+public:
+	int32 MaxLogCount = 100;
+	TTurinmaCircularQueue<FTurinmaProcessConsoleItem> Logs;
 
+	void ClearLog()
+	{
+		Logs.Reset();
+	}
+
+	void PushLog(const FTurinmaProcessConsoleItem& Log)
+	{
+		if(Logs.GetCount() >= MaxLogCount)
+		{
+			Logs.PopQueueNoRet();
+		}
+		Logs.Enqueue(Log);
+	}
+};
 
 class TURINMALUA_API FTurinmaProcess
 {
@@ -995,6 +1050,8 @@ class TURINMALUA_API FTurinmaProcess
 	bool InitProcessByProgram();
 
 public:
+
+	FTurinmaProcessConsole Console;
 
 	int32 MaxNumExecutePerTick = 10;
 

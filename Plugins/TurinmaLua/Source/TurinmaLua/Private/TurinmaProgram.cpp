@@ -1,7 +1,9 @@
 #include "TurinmaProgram.h"
 
 #include <coroutine>
-
+#if WITH_EDITOR
+#include "TickableEditorObject.h"
+#endif
 uint32 FTurinmaValue::GetHash() const
 {
 	uint32 Hash = GetTypeHash(ValueType);
@@ -102,6 +104,51 @@ bool FTurinmaValue::Equals(const FTurinmaValue& Other) const
 		}
 	}
 	return bRet;
+}
+
+FString FTurinmaValue::ToLexicalString() const
+{
+	switch (ValueType)
+	{
+	case ETurinmaValueType::Nil:
+		return TEXT("Nil");
+		
+	case ETurinmaValueType::Bool:
+		return BooleanValue ? TEXT("True") : TEXT("False");
+		
+	case ETurinmaValueType::Int:
+		{
+		TCHAR StrBuffer[100];
+		FCString::Sprintf(StrBuffer, TEXT("%lld"), IntValue);
+		return FString(StrBuffer);
+		}
+	case ETurinmaValueType::Real:
+	{
+		TCHAR StrBuffer[100];
+		FCString::Sprintf(StrBuffer, TEXT("%lf"), RealValue);
+		return FString(StrBuffer);
+	}
+	case ETurinmaValueType::Vector:
+		return VectorValue.ToString();
+		
+	case ETurinmaValueType::Quat:
+		return QuatValue.ToString();
+		
+	case ETurinmaValueType::Matrix:
+		return MatrixValue.ToString();
+
+	case ETurinmaValueType::Transform:
+		return TransformValue.ToString();
+
+	case ETurinmaValueType::String:
+		return StringValue;
+
+	case ETurinmaValueType::EndOfSimpleValue:
+		check(false)
+		return TEXT("");
+	default:
+		return HeapValue ? HeapValue->ToLexicalString() : TEXT("Nil");
+	}
 }
 
 uint32 FTurinmaArrayValue::GetHash() const
@@ -379,6 +426,44 @@ bool FTurinmaLexicalIntGraphNode::Execute(const FTurinmaNodeExecuteParam& Execut
 	return true;
 }
 
+TSharedPtr<FTurinmaGraphNodeBase> FTurinmaOutputLogGraphNodeData::CreateNode(const FTurinmaNodeCreateInfo& CreateInfo)
+{
+	auto S = MakeShared<FTurinmaOutputLogGraphNode>();
+	S->DataIndex = CreateInfo.DataIndex;
+	S->NodeIndex = CreateInfo.NodeIndex;
+	S->bIsPure = IsPure;
+	return S;
+}
+
+TArray<FTurinmaGraphNodeParamDescInfo> FTurinmaOutputLogGraphNodeData::GetInputParamDescs() const
+{
+	FTurinmaGraphNodeParamDescInfo Info;
+	Info.ValueType = ETurinmaValueType::Nil;
+	Info.ParamName = TEXT("Value");
+	return { Info };
+}
+
+DEFINE_TURINMA_GRAPH_NODE(FTurinmaOutputLogGraphNode)
+
+bool FTurinmaOutputLogGraphNode::Execute(const FTurinmaNodeExecuteParam& ExecuteParam)
+{
+	auto&& CallInfo = ExecuteParam.Process->CallInfos[ExecuteParam.CurCallInfo];
+	auto&& CallItem = CallInfo.CallStack[ExecuteParam.CurCallItem];
+	auto&& NodeItem = CallItem.LocalNodeIndex[ExecuteParam.MyIndex];
+
+	if(NodeItem.NodeInput.Num() > 0)
+	{
+		FString LogString = NodeItem.NodeInput[0].ToLexicalString();
+		ExecuteParam.Process->Console.PushLog({  LogString});
+		UE_LOG(LogTemp, Log, TEXT("%s"), *LogString);
+	}
+	if (!bIsPure)
+	{
+		NodeItem.WhichNextToGo = 0;
+	}
+	return true;
+}
+
 UE_DISABLE_OPTIMIZATION
 
 
@@ -566,12 +651,24 @@ UTurinmaProgram* UTurinmaProgram::GenerateTestTurinmaProgram()
 		auto&& Graph0 = Ret->GraphDatas.AddDefaulted_GetRef();
 		Graph0.GraphName = TEXT("Graph0");
 		auto&& Graph0Begin = Graph0.NodeDatas.AddDefaulted_GetRef();
+		int32 BeginNodeIndex = Graph0.NodeDatas.Num() - 1;
 
 		FTurinmaGraphInputNodeData Input;
 		auto&& Param = Input.OutputParamDesc.AddDefaulted_GetRef();
 		Param.ValueType = ETurinmaValueType::Int;
 		Param.ParamName = TEXT("Test");
 		Graph0Begin.SetData(Input);
+
+		FTurinmaOutputLogGraphNodeData LogNode;
+		auto&& LogNodeParam = LogNode.InputParams.AddDefaulted_GetRef();
+		LogNodeParam.ParamNode = BeginNodeIndex;
+		LogNodeParam.ParamPin = 0;
+		auto&& Graph0LogNode = Graph0.NodeDatas.AddDefaulted_GetRef();
+		int32 LogNodeIndex = Graph0.NodeDatas.Num() - 1;
+		Graph0LogNode.SetData(LogNode);
+
+		Graph0Begin.NodeData->NextNodes.AddDefaulted_GetRef().NextNode = LogNodeIndex;
+
 	}
 	{
 		auto&& GraphMain = Ret->GraphDatas.AddDefaulted_GetRef();
@@ -607,14 +704,38 @@ UTurinmaProgram* UTurinmaProgram::GenerateTestTurinmaProgram()
 	return Ret;
 }
 
-void UTurinmaProgram::TestRun(UTurinmaProgram* InProgram)
+class FTestTurinmaProcessRun : public FTickableEditorObject
 {
+public:
 	FTurinmaProcess Process;
-	Process.Program = InProgram;
-	Process.Start();
-	while(Process.IsRunning())
+	static FTestTurinmaProcessRun* It;
+
+	virtual void Tick(float DeltaTime) override
 	{
 		Process.Tick();
+	}
+	virtual TStatId GetStatId() const override
+	{
+		return TStatId();
+	}
+};
+FTestTurinmaProcessRun* FTestTurinmaProcessRun::It = nullptr;
+
+void UTurinmaProgram::TestRun(UTurinmaProgram* InProgram)
+{
+	TestStop();
+	FTestTurinmaProcessRun::It = new FTestTurinmaProcessRun();
+	FTestTurinmaProcessRun::It->Process.Program = InProgram;
+	FTestTurinmaProcessRun::It->Process.Start();
+}
+
+void UTurinmaProgram::TestStop()
+{
+	if (FTestTurinmaProcessRun::It)
+	{
+		FTestTurinmaProcessRun::It->Process.Stop();
+		delete FTestTurinmaProcessRun::It;
+
 	}
 }
 #endif
@@ -635,7 +756,7 @@ void UTurinmaProgram::PostDuplicate(EDuplicateMode::Type DuplicateMode)
 //	return false;
 //}
 
-std::suspend_never FTurinmaCoroutine::FTurinmaPromise::final_suspend() noexcept
+std::suspend_always FTurinmaCoroutine::FTurinmaPromise::final_suspend() noexcept
 {
 	UE_LOG(LogTemp, Log, TEXT("SWP :: Suspend"));
 	Process->bHasFinish = true;
@@ -716,6 +837,7 @@ bool FTurinmaProcess::Stop()
 		bShouldExit = true;
 		Coroutine.handle.resume();
 		check(Coroutine.handle.done());
+		Coroutine.handle.destroy();
 		CallInfos.Empty();
 	}
 	return false;
@@ -929,7 +1051,9 @@ FTurinmaCoroutine FTurinmaProcess::Execute()
 						bool bAnyError = false;
 						for (int OutI = 0; OutI < NodeItem.NodeOutput.Num(); ++OutI)
 						{
-							if (NodeItem.NodeOutput[OutI].ValueType != OutputParams[OutI].ValueType)
+							if (NodeItem.NodeOutput[OutI].ValueType != ETurinmaValueType::Nil
+								&& OutputParams[OutI].ValueType != ETurinmaValueType::Nil
+								&& NodeItem.NodeOutput[OutI].ValueType != OutputParams[OutI].ValueType)
 							{
 								bAnyError = true;
 								RecordError(FTurinmaErrorContent());

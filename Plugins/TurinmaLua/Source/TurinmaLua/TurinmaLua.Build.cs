@@ -7,7 +7,18 @@ public class TurinmaLua : ModuleRules
 	public TurinmaLua(ReadOnlyTargetRules Target) : base(Target)
 	{
 		PCHUsage = ModuleRules.PCHUsageMode.UseExplicitOrSharedPCHs;
-		
+
+		if (Target.bBuildEditor)
+		{
+            PublicDependencyModuleNames.AddRange(
+            new string[]
+            {
+                "UnrealEd"
+				// ... add other public dependencies that you statically link with here ...
+			}
+            );
+        }
+
 		PublicIncludePaths.AddRange(
 			new string[] {
 				// ... add public include paths required here ...
