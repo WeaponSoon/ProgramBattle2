@@ -25,9 +25,9 @@ enum class ETurinmaValueType : uint8
 
 	EndOfSimpleValue,
 
+	Function,
 	Array,
 	Table,
-	Function,
 	Struct
 };
 
@@ -45,36 +45,62 @@ struct FTurinmaValue
 	FTransform TransformValue;
 	FString StringValue;
 
-	TSharedPtr<struct FTurinmaHeapValue> HeapValue;
+	int32 HeapValueIndex = INDEX_NONE;
+
+	struct FTurinmaHeapValue* HeapValue(class FTurinmaProcess* Process);
+	const struct FTurinmaHeapValue* HeapValue(class FTurinmaProcess* Process) const;
 
 	ETurinmaValueType ValueType = ETurinmaValueType::Nil;
+	//游戏里的哈希值
+	uint32 GetHash(class FTurinmaProcess* Process) const;
+	uint32 GetSimpleHash() const
+	{
+		if (ValueType < ETurinmaValueType::EndOfSimpleValue)
+		{
+			return GetHash(nullptr);
+		}
+		uint32 Hash = GetTypeHash(ValueType);
+		return HashCombine(Hash, GetTypeHash(HeapValueIndex));
+	}
 
-	uint32 GetHash() const;
-	bool Equals(const FTurinmaValue& Other) const;
-
+	//游戏里判断相等
+	bool Equals(const FTurinmaValue& Other, class FTurinmaProcess* Process) const;
+	bool SimpleEquals(const FTurinmaValue& Other) const
+	{
+		if (ValueType != Other.ValueType)
+		{
+			return false;
+		}
+		if (ValueType < ETurinmaValueType::EndOfSimpleValue)
+		{
+			return Equals(Other, nullptr);
+		}
+		return HeapValueIndex == Other.HeapValueIndex;
+	}
+	//仅供底层使用的相等
 	bool operator==(const FTurinmaValue& Other) const
 	{
-		return Equals(Other);
+		return SimpleEquals(Other);
 	}
 
 	
-	FString ToLexicalString() const;
-	FTurinmaValue ToString() const
+	FString ToLexicalString(class FTurinmaProcess* Process) const;
+	FTurinmaValue ToString(class FTurinmaProcess* Process) const
 	{
 		FTurinmaValue Ret;
 		Ret.ValueType = ETurinmaValueType::String;
-		Ret.StringValue = ToLexicalString();
+		Ret.StringValue = ToLexicalString(Process);
 		return Ret;
 		
 	}
 };
-
+//仅供底层使用的哈希
 inline uint32 GetTypeHash(const FTurinmaValue& Id)
 {
-	return Id.GetHash();
+	return Id.GetSimpleHash();
 }
 
-enum class EHeapValueKind
+enum class EHeapValueKind : uint8
 {
 	None,
 	Function,
@@ -82,6 +108,13 @@ enum class EHeapValueKind
 	Table,
 	Struct
 };
+#define HEAPVALUETYPE_CHECKSAME(Type) static_assert((uint8)EHeapValueKind::Type == (uint8)ETurinmaValueType::Type - (uint8)ETurinmaValueType::EndOfSimpleValue);
+HEAPVALUETYPE_CHECKSAME(Function)
+HEAPVALUETYPE_CHECKSAME(Array)
+HEAPVALUETYPE_CHECKSAME(Table)
+HEAPVALUETYPE_CHECKSAME(Struct)
+
+
 
 struct FTurinmaHeapValue : TSharedFromThis<FTurinmaHeapValue>
 {
@@ -113,10 +146,14 @@ struct FTurinmaHeapValue : TSharedFromThis<FTurinmaHeapValue>
 
 	static EHeapValueKind StaticHeapValueKind() { return EHeapValueKind::None; }
 
-	virtual FString ToLexicalString() const { return TEXT(""); }
+	virtual FString ToLexicalString(class FTurinmaProcess* Process) const { return TEXT(""); }
 
-	virtual uint32 GetHash() const { return 0; }
-	virtual bool Equals(const FTurinmaHeapValue& Other) const { return false; }
+	virtual uint32 GetHash(class FTurinmaProcess* Process) const { return 0; }
+	virtual bool Equals(const FTurinmaHeapValue& Other, class FTurinmaProcess* Process) const { return false; }
+	virtual FTurinmaHeapValue* GetCopy() const
+	{
+		return new FTurinmaHeapValue(*this);
+	}
 
 	virtual ~FTurinmaHeapValue() = default;
 };
@@ -128,8 +165,12 @@ struct FTurinmaFunctionValue : FTurinmaHeapValue
 
 	static EHeapValueKind StaticHeapValueKind() { return EHeapValueKind::Function; }
 
-	virtual uint32 GetHash() const override { return GetTypeHash(this); }
-	virtual bool Equals(const FTurinmaHeapValue& Other) const override { return this == &Other; }
+	virtual uint32 GetHash(class FTurinmaProcess* Process) const override { return GetTypeHash(this); }
+	virtual bool Equals(const FTurinmaHeapValue& Other, class FTurinmaProcess* Process) const override { return this == &Other; }
+	virtual FTurinmaHeapValue* GetCopy() const override
+	{
+		return new FTurinmaFunctionValue(*this);
+	}
 };
 
 
@@ -141,8 +182,12 @@ struct FTurinmaArrayValue : FTurinmaHeapValue
 
 	static EHeapValueKind StaticHeapValueKind() { return EHeapValueKind::Array; }
 
-	virtual uint32 GetHash() const override;
-	virtual bool Equals(const FTurinmaHeapValue& Other) const override;
+	virtual uint32 GetHash(class FTurinmaProcess* Process) const override;
+	virtual bool Equals(const FTurinmaHeapValue& Other, class FTurinmaProcess* Process) const override;
+	virtual FTurinmaHeapValue* GetCopy() const override
+	{
+		return new FTurinmaArrayValue(*this);
+	}
 };
 
 struct FTurinmaTableValue : FTurinmaHeapValue
@@ -154,8 +199,12 @@ struct FTurinmaTableValue : FTurinmaHeapValue
 
 	static EHeapValueKind StaticHeapValueKind() { return EHeapValueKind::Table; }
 
-	virtual uint32 GetHash() const override;
-	virtual bool Equals(const FTurinmaHeapValue& Other) const override;
+	virtual uint32 GetHash(class FTurinmaProcess* Process) const override;
+	virtual bool Equals(const FTurinmaHeapValue& Other, class FTurinmaProcess* Process) const override;
+	virtual FTurinmaHeapValue* GetCopy() const override
+	{
+		return new FTurinmaTableValue(*this);
+	}
 };
 
 struct FNameFastCompaire
@@ -185,8 +234,12 @@ struct FTurinmaStructValue : FTurinmaHeapValue
 
 	static EHeapValueKind StaticHeapValueKind() { return EHeapValueKind::Struct; }
 
-	virtual uint32 GetHash() const override;
-	virtual bool Equals(const FTurinmaHeapValue& Other) const override;
+	virtual uint32 GetHash(class FTurinmaProcess* Process) const override;
+	virtual bool Equals(const FTurinmaHeapValue& Other, class FTurinmaProcess* Process) const override;
+	virtual FTurinmaHeapValue* GetCopy() const override
+	{
+		return new FTurinmaStructValue(*this);
+	}
 };
 
 
@@ -918,13 +971,46 @@ public:
 	}
 };
 
-struct FTurinmaProcessHeap
+
+struct FTurinmaProcessManagedHeap
 {
-	TArray<TSharedPtr<FTurinmaHeapValue>> TurinmaHeap;
+	TArray<int32> UnusedIndex;
+	TArray<TUniquePtr<FTurinmaHeapValue>> TurinmaHeapValues;
+	FTurinmaProcessManagedHeap() = default;
+	FTurinmaProcessManagedHeap(const FTurinmaProcessManagedHeap& Other) : UnusedIndex(Other.UnusedIndex)
+	{
+		TurinmaHeapValues.Reserve(TurinmaHeapValues.Num());
+		for(auto&& Item : TurinmaHeapValues)
+		{
+			TurinmaHeapValues.Emplace(Item->GetCopy());
+		}
+	}
+	FTurinmaProcessManagedHeap(FTurinmaProcessManagedHeap&& Other) noexcept : UnusedIndex(MoveTemp(Other.UnusedIndex)), TurinmaHeapValues(MoveTemp(Other.TurinmaHeapValues))
+	{
+		
+	}
+
+	FTurinmaProcessManagedHeap& operator=(const FTurinmaProcessManagedHeap& Other)
+	{
+		UnusedIndex = Other.UnusedIndex;
+		TurinmaHeapValues.Reset(TurinmaHeapValues.Num());
+		for (auto&& Item : TurinmaHeapValues)
+		{
+			TurinmaHeapValues.Emplace(Item->GetCopy());
+		}
+		return *this;
+	}
+	FTurinmaProcessManagedHeap& operator=(FTurinmaProcessManagedHeap&& Other) noexcept
+	{
+		UnusedIndex = MoveTemp(Other.UnusedIndex);
+		TurinmaHeapValues = MoveTemp(Other.TurinmaHeapValues);
+		return *this;
+	}
 };
+
 struct FTurinmaProcessGlobal
 {
-	TMap<FName, TSharedPtr<FTurinmaHeapValue>>  TurinmaGlobals;
+	TMap<FName, FTurinmaValue>  TurinmaGlobals;
 };
 
 struct FTurinmaProcessCallInfoItem
@@ -1072,7 +1158,7 @@ public:
 	}
 
 	TWeakObjectPtr<UTurinmaProgram> Program;
-	FTurinmaProcessHeap Heap;
+	FTurinmaProcessManagedHeap Heap;
 	FTurinmaProcessGlobal Globals;
 	TIndirectArray<FTurinmaGraph> Graphs;
 	TIndirectArray<FTurinmaProcessCallInfo> CallInfos;

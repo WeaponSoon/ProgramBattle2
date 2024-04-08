@@ -4,7 +4,33 @@
 #if WITH_EDITOR
 #include "TickableEditorObject.h"
 #endif
-uint32 FTurinmaValue::GetHash() const
+FTurinmaHeapValue* FTurinmaValue::HeapValue(FTurinmaProcess* Process)
+{
+	return const_cast<FTurinmaHeapValue*>((const_cast<const FTurinmaValue*>(this)->HeapValue(Process)));
+}
+
+const FTurinmaHeapValue* FTurinmaValue::HeapValue(FTurinmaProcess* Process) const
+{
+	if (ValueType > ETurinmaValueType::EndOfSimpleValue && Process && Process->Heap.TurinmaHeapValues.IsValidIndex(HeapValueIndex))
+	{
+		
+		auto R = Process->Heap.TurinmaHeapValues[HeapValueIndex].Get();
+		if (R && static_cast<std::underlying_type_t<EHeapValueKind>>(R->GetHeapValueKind()) ==
+			static_cast<std::underlying_type_t<ETurinmaValueType>>(ValueType) -
+			static_cast<std::underlying_type_t<ETurinmaValueType>>(ETurinmaValueType::EndOfSimpleValue))
+		{
+			return R;
+		}
+		else
+		{
+			Process->RecordError({  });
+		}
+	}
+	return nullptr;
+}
+
+
+uint32 FTurinmaValue::GetHash(class FTurinmaProcess* Process) const
 {
 	uint32 Hash = GetTypeHash(ValueType);
 	switch (ValueType)
@@ -40,13 +66,13 @@ uint32 FTurinmaValue::GetHash() const
 	case ETurinmaValueType::String: 
 		Hash = HashCombine(Hash, GetTypeHash(StringValue));
 		break;
+	case ETurinmaValueType::Function:
 	case ETurinmaValueType::Array: 
 	case ETurinmaValueType::Table: 
-	case ETurinmaValueType::Function:
 	case ETurinmaValueType::Struct:
-		if(HeapValue)
+		if(HeapValue(Process))
 		{
-			Hash = HashCombine(Hash, HeapValue->GetHash());
+			Hash = HashCombine(Hash, HeapValue(Process)->GetHash(Process));
 		}
 		break;
 	default:;
@@ -54,7 +80,7 @@ uint32 FTurinmaValue::GetHash() const
 	return Hash;
 }
 
-bool FTurinmaValue::Equals(const FTurinmaValue& Other) const
+bool FTurinmaValue::Equals(const FTurinmaValue& Other, class FTurinmaProcess* Process) const
 {
 	bool bRet = ValueType == Other.ValueType;
 	if(bRet)
@@ -88,13 +114,13 @@ bool FTurinmaValue::Equals(const FTurinmaValue& Other) const
 		case ETurinmaValueType::String:
 			bRet = StringValue == Other.StringValue;
 			break;
+		case ETurinmaValueType::Function:
 		case ETurinmaValueType::Array:
 		case ETurinmaValueType::Table:
-		case ETurinmaValueType::Function:
 		case ETurinmaValueType::Struct:
-			if (HeapValue)
+			if (HeapValue(Process))
 			{
-				bRet = HeapValue->Equals(*Other.HeapValue);
+				bRet = HeapValue(Process)->Equals(*Other.HeapValue(Process), Process);
 			}
 			break;
 		
@@ -106,7 +132,7 @@ bool FTurinmaValue::Equals(const FTurinmaValue& Other) const
 	return bRet;
 }
 
-FString FTurinmaValue::ToLexicalString() const
+FString FTurinmaValue::ToLexicalString(class FTurinmaProcess* Process) const
 {
 	switch (ValueType)
 	{
@@ -147,21 +173,21 @@ FString FTurinmaValue::ToLexicalString() const
 		check(false)
 		return TEXT("");
 	default:
-		return HeapValue ? HeapValue->ToLexicalString() : TEXT("Nil");
+		return HeapValue(Process) ? HeapValue(Process)->ToLexicalString(Process) : TEXT("Nil");
 	}
 }
 
-uint32 FTurinmaArrayValue::GetHash() const
+uint32 FTurinmaArrayValue::GetHash(class FTurinmaProcess* Process) const
 {
 	uint32 Hash = 0;
 	for(auto&& Item : Values)
 	{
-		Hash = HashCombine(Hash, Item.GetHash());
+		Hash = HashCombine(Hash, Item.GetHash(Process));
 	}
 	return Hash;
 }
 
-bool FTurinmaArrayValue::Equals(const FTurinmaHeapValue& Other) const
+bool FTurinmaArrayValue::Equals(const FTurinmaHeapValue& Other, class FTurinmaProcess* Process) const
 {
 	if(this == &Other)
 	{
@@ -177,7 +203,7 @@ bool FTurinmaArrayValue::Equals(const FTurinmaHeapValue& Other) const
 	{
 		for (int i = 0; i < Values.Num(); ++i)
 		{
-			if (!Values[i].Equals(TypedOther->Values[i]))
+			if (!Values[i].Equals(TypedOther->Values[i], Process))
 			{
 				return false;
 			}
@@ -187,29 +213,29 @@ bool FTurinmaArrayValue::Equals(const FTurinmaHeapValue& Other) const
 	return false;
 }
 
-uint32 FTurinmaTableValue::GetHash() const
+uint32 FTurinmaTableValue::GetHash(class FTurinmaProcess* Process) const
 {
 	return GetTypeHash(this);
 }
 
-bool FTurinmaTableValue::Equals(const FTurinmaHeapValue& Other) const
+bool FTurinmaTableValue::Equals(const FTurinmaHeapValue& Other, class FTurinmaProcess* Process) const
 {
 	return this == &Other;
 }
 
-uint32 FTurinmaStructValue::GetHash() const
+uint32 FTurinmaStructValue::GetHash(class FTurinmaProcess* Process) const
 {
 	uint32 Hash = GetTypeHash(ProtoName);
 	for(auto&& Item : Fields)
 	{
 		Hash = HashCombine(Hash, GetTypeHash(Item.first));
-		Hash = HashCombine(Hash, Item.second.GetHash());
+		Hash = HashCombine(Hash, Item.second.GetHash(Process));
 	}
 
 	return Hash;
 }
 
-bool FTurinmaStructValue::Equals(const FTurinmaHeapValue& Other) const
+bool FTurinmaStructValue::Equals(const FTurinmaHeapValue& Other, class FTurinmaProcess* Process) const
 {
 	if (this == &Other)
 	{
@@ -236,7 +262,7 @@ bool FTurinmaStructValue::Equals(const FTurinmaHeapValue& Other) const
 		auto&& OtherIter = TypedOther->Fields.find(Item.first);
 		if(OtherIter != TypedOther->Fields.end())
 		{
-			if(!OtherIter->second.Equals(Item.second))
+			if(!OtherIter->second.Equals(Item.second, Process))
 			{
 				return false;
 			}
@@ -453,7 +479,7 @@ bool FTurinmaOutputLogGraphNode::Execute(const FTurinmaNodeExecuteParam& Execute
 
 	if(NodeItem.NodeInput.Num() > 0)
 	{
-		FString LogString = NodeItem.NodeInput[0].ToLexicalString();
+		FString LogString = NodeItem.NodeInput[0].ToLexicalString(ExecuteParam.Process);
 		ExecuteParam.Process->Console.PushLog({  LogString});
 		UE_LOG(LogTemp, Log, TEXT("%s"), *LogString);
 	}
@@ -666,6 +692,8 @@ UTurinmaProgram* UTurinmaProgram::GenerateTestTurinmaProgram()
 		auto&& Graph0LogNode = Graph0.NodeDatas.AddDefaulted_GetRef();
 		int32 LogNodeIndex = Graph0.NodeDatas.Num() - 1;
 		Graph0LogNode.SetData(LogNode);
+
+
 
 		Graph0Begin.NodeData->NextNodes.AddDefaulted_GetRef().NextNode = LogNodeIndex;
 
