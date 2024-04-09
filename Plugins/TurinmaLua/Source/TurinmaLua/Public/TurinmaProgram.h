@@ -118,7 +118,7 @@ HEAPVALUETYPE_CHECKSAME(Struct)
 
 struct FTurinmaHeapValue : TSharedFromThis<FTurinmaHeapValue>
 {
-	bool bReached = false;
+	bool bReached = true;
 
 	template<typename T>
 	T* GetTyped()
@@ -1133,6 +1133,9 @@ class TURINMALUA_API FTurinmaProcess
 	bool bHasFinish = false;
 	bool bShouldExit = false;
 
+	TArray<int32> UnusedCallInfoIndex;
+	int32 CurCallInfo = INDEX_NONE;
+
 	bool InitProcessByProgram();
 
 public:
@@ -1140,6 +1143,7 @@ public:
 	FTurinmaProcessConsole Console;
 
 	int32 MaxNumExecutePerTick = 10;
+	int32 MaxGCProcessCount = 10;
 
 	FName EntryGraphName = TEXT("Main");
 
@@ -1166,16 +1170,15 @@ public:
 
 	FTurinmaErrorInfo ErrorInfo;
 
-	int32 CurCallInfo = INDEX_NONE;
-
-	int32 NextCallInfo = INDEX_NONE;
+	TArray<int32> CurCallInfoStack;
+	
 
 	bool IsGraphValid(int32 GraphIndex);
 	bool IsNodeValid(int32 GraphIndex, int32 NodeIndex);
 	bool IsNodePure(int32 GraphIndex, int32 NodeIndex);
 	bool LocalJmp(FTurinmaProcessCallInfoItem& Item, int32 NodeIndex);
 	bool LongJmp(FTurinmaProcessCallInfo& CallInfo, int32 GraphIndex);
-	bool Return();
+	bool Return(int32 InCurCallInfo);
 
 	void RecordError(const FTurinmaErrorContent& InErrorContent);
 

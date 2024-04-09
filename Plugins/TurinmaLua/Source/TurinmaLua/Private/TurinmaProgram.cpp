@@ -948,11 +948,11 @@ bool FTurinmaProcess::LongJmp(FTurinmaProcessCallInfo& CallInfo, int32 GraphInde
 	return false;
 }
 
-bool FTurinmaProcess::Return()
+bool FTurinmaProcess::Return(int32 InCurCallInfo)
 {
-	if(CallInfos.IsValidIndex(CurCallInfo))
+	if(CallInfos.IsValidIndex(InCurCallInfo))
 	{
-		auto&& CallInfo = CallInfos[CurCallInfo];
+		auto&& CallInfo = CallInfos[InCurCallInfo];
 		if(CallInfo.CallStack.Num() > 0)
 		{
 			int32 JumpIntoNodeIndex = CallInfo.CallStack.Last().JumpIntoNodeIndex;
@@ -962,6 +962,10 @@ bool FTurinmaProcess::Return()
 			if(CallInfo.CallStack.Num() > 0)
 			{
 				CallInfo.CallStack.Last().TempLocalVariables.FindOrAdd(JumpIntoNodeIndex) = GraphOutput;
+			}
+			if(CallInfo.CallStack.Num() == 0)
+			{
+				UnusedCallInfoIndex.Add(InCurCallInfo);
 			}
 			return true;
 		}
@@ -979,11 +983,13 @@ void FTurinmaProcess::RecordError(const FTurinmaErrorContent& InErrorContent)
 FTurinmaCoroutine FTurinmaProcess::Execute()
 {
 	int32 CurLeftExecuteNum = MaxNumExecutePerTick;
+	int32 CurLeftCountBeforeGC = MaxGCProcessCount;
 	while (!bShouldExit && !ErrorInfo.bError)
 	{
 		if (CallInfos.IsValidIndex(CurCallInfo) && CallInfos[CurCallInfo].CallStack.Num() > 0)
 		{
-			auto&& CallInfo = CallInfos[CurCallInfo];
+			int32 LocalCurCallInfo = CurCallInfo;
+			auto&& CallInfo = CallInfos[LocalCurCallInfo];
 			auto&& CallItem = CallInfo.CallStack.Last();
 			if (CallItem.LocalNodeIndex.Num() > 0)
 			{
@@ -1046,7 +1052,7 @@ FTurinmaCoroutine FTurinmaProcess::Execute()
 					{
 						FTurinmaNodeExecuteParam Param;
 						Param.Process = this;
-						Param.CurCallInfo = CurCallInfo;
+						Param.CurCallInfo = LocalCurCallInfo;
 						Param.CurCallItem = CallInfo.CallStack.Num() - 1;
 						Param.MyIndex = CallItem.LocalNodeIndex.Num() - 1;
 						int32 NumOfStack = CallInfo.CallStack.Num();
@@ -1128,7 +1134,7 @@ FTurinmaCoroutine FTurinmaProcess::Execute()
 								CallItem.LocalNodeIndex.RemoveAt(CallItem.LocalNodeIndex.Num() - 1);
 								if (CallItem.LocalNodeIndex.Num() == 0)
 								{
-									Return();
+									Return(LocalCurCallInfo);
 								}
 							}
 						}
@@ -1137,7 +1143,7 @@ FTurinmaCoroutine FTurinmaProcess::Execute()
 							CallItem.LocalNodeIndex.RemoveAt(CallItem.LocalNodeIndex.Num() - 1);
 							if (CallItem.LocalNodeIndex.Num() == 0)
 							{
-								Return();
+								Return(LocalCurCallInfo);
 							}
 						}
 					};
@@ -1147,9 +1153,172 @@ FTurinmaCoroutine FTurinmaProcess::Execute()
 				}
 			}
 		}
+		else
+		{
+			bool bFound = false;
+			while(CurCallInfoStack.Num() > 0)
+			{
+				int32 LastCurCallInfoIndex = CurCallInfoStack.Pop();
+				if(CallInfos.IsValidIndex(LastCurCallInfoIndex) && CallInfos[LastCurCallInfoIndex].CallStack.Num() > 0)
+				{
+					bFound = true;
+					CurCallInfo = LastCurCallInfoIndex;
+					break;
+				}
+			}
+			if(!bFound)
+			{
+				for(int CI = 0; CI < CallInfos.Num(); ++CI)
+				{
+					if(CallInfos[CI].CallStack.Num() > 0)
+					{
+						bFound = true;
+						CurCallInfo = CI;
+						break;
+					}
+				}
+			}
+			if(!bFound)
+			{
+				CurCallInfo = INDEX_NONE;
+			}
+
+		}
 		--CurLeftExecuteNum;
 		if(CurLeftExecuteNum <= 0)
 		{
+			--CurLeftCountBeforeGC;
+			if(CurLeftCountBeforeGC <= 0)
+			{
+				CurLeftCountBeforeGC = MaxGCProcessCount;
+
+				auto&& DoGC = [&]()->bool
+					{
+						for(auto&& HeapValue : Heap.TurinmaHeapValues)
+						{
+							if(HeapValue)
+							{
+								HeapValue->bReached = false;
+							}
+						}
+						//todo do gc
+						for (auto&& Item : Globals.TurinmaGlobals)
+						{
+							if(Item.Value.ValueType > ETurinmaValueType::EndOfSimpleValue)
+							{
+								auto* HeapValue = Item.Value.HeapValue(this);
+								if (!HeapValue && Heap.TurinmaHeapValues.IsValidIndex(Item.Value.HeapValueIndex))
+								{
+									return false;
+								}
+								if(HeapValue)
+								{
+									HeapValue->bReached = true;
+								}
+							}
+							
+						}
+						for (auto&& CallInfo : CallInfos)
+						{
+							for (auto&& CallItem : CallInfo.CallStack)
+							{
+								for (auto&& Item : CallItem.GraphInputValue)
+								{
+									auto* HeapValue = Item.HeapValue(this);
+									if (!HeapValue && Heap.TurinmaHeapValues.IsValidIndex(Item.HeapValueIndex))
+									{
+										return false;
+									}
+									if (HeapValue)
+									{
+										HeapValue->bReached = true;
+									}
+								}
+								for (auto&& Item : CallItem.GraphOutputValue)
+								{
+									auto* HeapValue = Item.HeapValue(this);
+									if (!HeapValue && Heap.TurinmaHeapValues.IsValidIndex(Item.HeapValueIndex))
+									{
+										return false;
+									}
+									if (HeapValue)
+									{
+										HeapValue->bReached = true;
+									}
+								}
+								for (auto&& Item : CallItem.LocalVariables)
+								{
+									auto* HeapValue = Item.Value.HeapValue(this);
+									if (!HeapValue && Heap.TurinmaHeapValues.IsValidIndex(Item.Value.HeapValueIndex))
+									{
+										return false;
+									}
+									if (HeapValue)
+									{
+										HeapValue->bReached = true;
+									}
+								}
+								for (auto&& TempVar : CallItem.TempLocalVariables)
+								{
+									for (auto&& Item : TempVar.Value)
+									{
+										auto* HeapValue = Item.HeapValue(this);
+										if (!HeapValue && Heap.TurinmaHeapValues.IsValidIndex(Item.HeapValueIndex))
+										{
+											return false;
+										}
+										if (HeapValue)
+										{
+											HeapValue->bReached = true;
+										}
+									}
+								}
+								for (auto&& LocalNode : CallItem.LocalNodeIndex)
+								{
+									for (auto&& Item : LocalNode.NodeInput)
+									{
+										auto* HeapValue = Item.HeapValue(this);
+										if (!HeapValue && Heap.TurinmaHeapValues.IsValidIndex(Item.HeapValueIndex))
+										{
+											return false;
+										}
+										if (HeapValue)
+										{
+											HeapValue->bReached = true;
+										}
+									}
+									for (auto&& Item : LocalNode.NodeOutput)
+									{
+										auto* HeapValue = Item.HeapValue(this);
+										if (!HeapValue && Heap.TurinmaHeapValues.IsValidIndex(Item.HeapValueIndex))
+										{
+											return false;
+										}
+										if (HeapValue)
+										{
+											HeapValue->bReached = true;
+										}
+									}
+								}
+							}
+						}
+						for(int32 HI = 0; HI < Heap.TurinmaHeapValues.Num(); ++HI)
+						{
+							auto&& HeapValue = Heap.TurinmaHeapValues[HI];
+							if (HeapValue && !HeapValue->bReached)
+							{
+								HeapValue.Reset();
+								Heap.UnusedIndex.Add(HI);
+							}
+						}
+						return true;
+					};
+
+				if(!DoGC())
+				{
+					RecordError({});
+				}
+			}
 			CurLeftExecuteNum = MaxNumExecutePerTick;
 			co_await std::suspend_always{};//todo coroutine not finish yet
 		}
