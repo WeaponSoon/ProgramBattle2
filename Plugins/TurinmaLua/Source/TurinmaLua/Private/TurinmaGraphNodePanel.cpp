@@ -46,9 +46,14 @@ void UTurinmaGraphNodeBaseWidget::OnNodeTitleCommitted(const FText& Text, ETextC
 	}
 }
 
+void UTurinmaGraphNodeBaseWidget::OnInitData_Implementation()
+{
+}
+
 void UTurinmaGraphNodeBaseWidget::InitData()
 {
-	if (NodeItem.GetGraphNodeData())
+	ResetUI();
+	if (auto* NodeData = NodeItem.GetGraphNodeData())
 	{
 		if (TitleContainer)
 		{
@@ -64,10 +69,10 @@ void UTurinmaGraphNodeBaseWidget::InitData()
 		if(TitleWidget)
 		{
 			ITurinmaParamTitleWidgetInterface::Execute_OnSetTurinmaGraphNodeWidget(TitleWidget, this);
-			ITurinmaParamTitleWidgetInterface::Execute_SetTitle(TitleWidget, NodeItem.GetGraphNodeData()->GetNodeName().ToString());
+			ITurinmaParamTitleWidgetInterface::Execute_SetTitle(TitleWidget, NodeData->GetNodeName().ToString());
 		}
 
-		if (ExecInputContainer)
+		if (ExecInputContainer && !NodeData->IsPure)
 		{
 			if (ExecInputPinClass)
 			{
@@ -78,7 +83,7 @@ void UTurinmaGraphNodeBaseWidget::InitData()
 				}
 			}
 		}
-		if (ExecOutputContainer)
+		if (ExecOutputContainer && !NodeData->IsPure && NodeData->DesiredNextNodesNumber() > 0)
 		{
 			if (ExecOutputPinClass)
 			{
@@ -86,6 +91,18 @@ void UTurinmaGraphNodeBaseWidget::InitData()
 				if (ExecOutputPinWidget)
 				{
 					ExecOutputContainer->AddChild(ExecOutputPinWidget);
+				}
+			}
+		}
+		if(ExtraExecOutputContainer && !NodeData->IsPure && NodeData->DesiredNextNodesNumber() > 1)
+		{
+			for(int NOI = 1; NOI < NodeData->DesiredNextNodesNumber(); ++NOI)
+			{
+				auto* ExtraExecOutputPinWidget = WidgetTree->ConstructWidget<UWidget>(ExecOutputPinClass);
+				if (ExtraExecOutputPinWidget)
+				{
+					ExtraExecOutputContainer->AddChild(ExtraExecOutputPinWidget);
+					ExtraExecOutputPinWidgets.Add(ExtraExecOutputPinWidget);
 				}
 			}
 		}
@@ -121,15 +138,56 @@ void UTurinmaGraphNodeBaseWidget::InitData()
 
 		if(InputList)
 		{
-			auto&& InputParams = NodeItem.GetGraphNodeData()->GetInputParamDescs();
+			auto&& InputParams = NodeData->GetInputParamDescs();
 			SetParamNode(InputList, ParamInputInterface, InputParams, ParamInputWidget, ETurinmaPinKind::ParamInput);
 		}
 		if(OutputList)
 		{
-			auto&& OutputParams = NodeItem.GetGraphNodeData()->GetOutputParamDescs();
+			auto&& OutputParams = NodeData->GetOutputParamDescs();
 			SetParamNode(OutputList, ParamOutputInterface, OutputParams, ParamOutputWidget, ETurinmaPinKind::ParamOutput);
 		}
-		
+
+		OnInitData();
+	}
+}
+
+void UTurinmaGraphNodeBaseWidget::ResetUI()
+{
+	if(TitleContainer)
+	{
+		TitleContainer->ClearChildren();
+		TitleWidget = nullptr;
+
+	}
+
+	if(ExecInputContainer)
+	{
+		ExecInputContainer->ClearChildren();
+		ExecInputPinWidget = nullptr;
+	}
+	
+	if(ExecOutputContainer)
+	{
+		ExecOutputContainer->ClearChildren();
+		ExecOutputPinWidget = nullptr;
+	}
+
+	if(ExtraExecOutputContainer)
+	{
+		ExtraExecOutputContainer->ClearChildren();
+		ExtraExecOutputPinWidgets.Empty();
+	}
+
+	if(InputList)
+	{
+		InputList->ClearChildren();
+		ParamInputWidget.Empty();
+	}
+
+	if(OutputList)
+	{
+		OutputList->ClearChildren();
+		ParamOutputWidget.Empty();
 	}
 }
 

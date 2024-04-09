@@ -252,7 +252,15 @@ struct FTurinmaStructValue : FTurinmaHeapValue
 	virtual void* GetThisPtr() const override\
 	{\
 		return (void*)this;\
-	}
+	}\
+	void CopyForm(const FTurinmaGraphNodeDataBase* Other) override\
+	{\
+		if(GetDataType() == Other->GetDataType())\
+		{\
+			*this = *static_cast<const std::remove_reference_t<decltype(*this)>*>(Other);\
+		}\
+	}\
+
 
 USTRUCT(BlueprintType)
 struct FTurinmaGraphNodeLinkInfo
@@ -401,7 +409,17 @@ struct TURINMALUA_API FTurinmaGraphNodeDataBase
 		return (void*)this;
 	}
 
+	virtual void CopyForm(const FTurinmaGraphNodeDataBase* Other)
+	{
+		if(GetDataType() == Other->GetDataType())
+		{
+			*this = *static_cast<const std::remove_reference_t<decltype(*this)>*>(Other);
+		}
+	}
+
 	virtual TSharedPtr<struct FTurinmaGraphNodeBase> CreateNode(const FTurinmaNodeCreateInfo& CreatInfo) { return nullptr; }
+
+	virtual int32 DesiredNextNodesNumber() const { return 1; }
 
 	virtual bool CanChangeNodeNameTo(const FString& InPendingName) { return false; }
 
@@ -561,7 +579,7 @@ struct FTurinmaGraphOutputNodeData : public FTurinmaGraphNodeDataBase
 	{
 		return InputParamDesc;
 	}
-
+	virtual int32 DesiredNextNodesNumber() const override { return 0; }
 	virtual bool CanModifyInputParamsDesc() const override
 	{
 		return true;

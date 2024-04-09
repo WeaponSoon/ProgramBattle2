@@ -155,7 +155,7 @@ class TURINMALUA_API UTurinmaGraphNodeBaseWidget : public UUserWidget
 	TSharedPtr<STurinmaGraphNodeSlate> MySlate;
 
 public:
-	UPROPERTY(EditAnywhere, Category = Data)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Data)
 	FTurinmaGraphNodeItem NodeItem;
 
 public:
@@ -174,7 +174,10 @@ public:
 	UContentWidget* ExecOutputContainer = nullptr;
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, meta = (BindWidget))
 	UContentWidget* ExecInputContainer = nullptr;
-	
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, meta = (BindWidget, OptionalWidget))
+	UVerticalBox* ExtraExecOutputContainer = nullptr;
+
+
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, meta = (BindWidget))
 	UCanvasPanel* BasePanel = nullptr;
@@ -191,6 +194,9 @@ public:
 	TSubclassOf<UWidget> ExecOutputPinClass;
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite)
 	UWidget* ExecOutputPinWidget = nullptr;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite)
+	TArray<UWidget*> ExtraExecOutputPinWidgets;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	TSubclassOf<UWidget> ExecInputPinClass;
@@ -212,7 +218,38 @@ public:
 	UFUNCTION(BlueprintCallable)
 	void OnNodeTitleCommitted(const FText& Text, ETextCommit::Type CommitMethod);
 
+	UFUNCTION(BlueprintNativeEvent)
+	void OnInitData();
+
+
+	UFUNCTION(BlueprintCallable, CustomThunk, meta=(CustomStructureParam="OutGraphNodeData"))
+	static bool GetNodeData(const FTurinmaGraphNodeItem& InNodeItem, FTurinmaGraphNodeDataBase& OutGraphNodeData);
+	DECLARE_FUNCTION(execGetNodeData)
+	{
+		P_GET_STRUCT_REF(FTurinmaGraphNodeItem, Z_Param_InNodeItem);
+
+		FTurinmaGraphNodeDataBase Z_Param_OutGraphNodeDataTemp;
+		Stack.MostRecentPropertyAddress = nullptr;
+		Stack.MostRecentProperty = nullptr;
+		FTurinmaGraphNodeDataBase& Z_Param_OutGraphNodeData = Stack.StepCompiledInRef<FStructProperty, FTurinmaGraphNodeDataBase>(&Z_Param_OutGraphNodeDataTemp);
+
+		P_FINISH;
+		P_NATIVE_BEGIN;
+		if(Z_Param_InNodeItem.GetGraphNodeData() && 
+			Z_Param_OutGraphNodeData.GetDataType() == Z_Param_InNodeItem.GetGraphNodeData()->GetDataType())
+		{
+			Z_Param_OutGraphNodeData.CopyForm(Z_Param_InNodeItem.GetGraphNodeData());
+			(*(bool*)Z_Param__Result) = true;
+		}
+		else
+		{
+			(*(bool*)Z_Param__Result) = false;
+		}
+		P_NATIVE_END;
+	}
+
 	void InitData();
+	void ResetUI();
 };
 
 UCLASS(BlueprintType)
