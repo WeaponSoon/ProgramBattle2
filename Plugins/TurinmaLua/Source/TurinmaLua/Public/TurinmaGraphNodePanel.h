@@ -98,23 +98,12 @@ struct TURINMALUA_API FTurinmaGraphItem
 	GENERATED_BODY()
 
 	UPROPERTY(EditAnywhere)
-	UTurinmaProgram* Program = nullptr;
+	class UTurinmaGraphPanelBaseWidget* GraphPanel = nullptr;
 
 	UPROPERTY(EditAnywhere)
 	FName GraphName = NAME_None;
 
-	FTurinmaGraphData* GetGraphData()
-	{
-		if(!Program)
-		{
-			return nullptr;
-		}
-		return Program->GraphDatas.FindByPredicate(
-			[this](const FTurinmaGraphData& Data)->bool
-			{
-				return Data.GraphName == GraphName;
-			});
-	}
+	FTurinmaGraphData* GetGraphData();
 };
 
 USTRUCT(BlueprintType)

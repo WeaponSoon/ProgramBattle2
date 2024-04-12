@@ -4,6 +4,16 @@
 #include "Blueprint/WidgetTree.h"
 #include "Components/CanvasPanelSlot.h"
 
+FTurinmaGraphData* FTurinmaGraphItem::GetGraphData()
+{
+	if (!GraphPanel)
+	{
+		return nullptr;
+	}
+	return GraphPanel->HistoryBuffer.GetGraphDataByName(GraphName);
+
+}
+
 bool UTurinmaGraphNodeBaseWidget::Initialize()
 {
 	bool SuperRet = Super::Initialize();
@@ -232,7 +242,7 @@ void UTurinmaGraphPanelBaseWidget::BuildGraphPanel(FName InName)
 				auto&& NodeWidgetType = GraphNodeDataToGraphNodeWidgetType->ResolveWidgetTypeByClass(NodeData.NodeType);
 				UTurinmaGraphNodeBaseWidget* NodeW = CreateWidget<UTurinmaGraphNodeBaseWidget>(this, NodeWidgetType, NodeData.NodeData->GetNodeName());
 				NodeW->NodeItem.NodeIndex = NodeIndex;
-				NodeW->NodeItem.Graph.Program = HistoryBuffer.Program;
+				NodeW->NodeItem.Graph.GraphPanel = this;
 				NodeW->NodeItem.Graph.GraphName = InName;
 				UCanvasPanelSlot* SlotW = GraphPanel->AddChildToCanvas(NodeW);
 				NodeWidgets.Add(NodeIndex, NodeW);
@@ -240,7 +250,6 @@ void UTurinmaGraphPanelBaseWidget::BuildGraphPanel(FName InName)
 				SlotW->SetAnchors(FAnchors(0.5f, 0.5f, 0.5f, 0.5f));
 				SlotW->SetPosition(NodeData.NodeData->Location);
 				SlotW->SetSize(NodeData.NodeData->Size);
-				
 			}
 		}
 		//todo link them all
