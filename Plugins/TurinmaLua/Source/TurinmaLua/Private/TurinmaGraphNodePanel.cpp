@@ -250,9 +250,12 @@ void UTurinmaGraphPanelBaseWidget::BuildGraphPanel(FName InName)
 				SlotW->SetAnchors(FAnchors(0.5f, 0.5f, 0.5f, 0.5f));
 				SlotW->SetPosition(NodeData.NodeData->Location);
 				SlotW->SetSize(NodeData.NodeData->Size);
+
+				NodeW->InitData();
 			}
 		}
 		//todo link them all
+
 	}
 }
 

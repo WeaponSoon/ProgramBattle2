@@ -669,7 +669,6 @@ void UTurinmaProgram::InitAllGraphDatas()
 	}
 }
 
-#if WITH_EDITOR
 UTurinmaProgram* UTurinmaProgram::GenerateTestTurinmaProgram()
 {
 	UTurinmaProgram* Ret = NewObject<UTurinmaProgram>();
@@ -703,12 +702,15 @@ UTurinmaProgram* UTurinmaProgram::GenerateTestTurinmaProgram()
 		GraphMain.GraphName = TEXT("Main");
 		auto&& GraphMainBegin = GraphMain.NodeDatas.AddDefaulted_GetRef();
 		GraphMainBegin.SetData(FTurinmaGraphInputNodeData());
-		
+		GraphMainBegin.NodeData->Location = FVector2D(-400,0);
+
+
 		FTurinmaCallGraphNodeData CallNode;
 		CallNode.GraphName = TEXT("Graph0");
 		auto&& GraphMainCallGraph0Node = GraphMain.NodeDatas.AddDefaulted_GetRef();
 		int32 CallNodeIndex = GraphMain.NodeDatas.Num() - 1;
 		GraphMainCallGraph0Node.SetData(CallNode);
+		GraphMainCallGraph0Node.NodeData->Location = FVector2D(400, 400);
 
 		auto&& GraphMainLexicalIntNode = GraphMain.NodeDatas.AddDefaulted_GetRef();
 		int32 LexicalIntIndex = GraphMain.NodeDatas.Num() - 1;
@@ -716,7 +718,7 @@ UTurinmaProgram* UTurinmaProgram::GenerateTestTurinmaProgram()
 		LexicalInt.LexicalInt = 100;
 		LexicalInt.IsPure = true;
 		GraphMainLexicalIntNode.SetData(LexicalInt);
-
+		GraphMainLexicalIntNode.NodeData->Location = FVector2D(0, -200);
 
 
 		auto&& LinkToCallGraph0 = GraphMainBegin.NodeData->NextNodes.AddDefaulted_GetRef();
@@ -766,7 +768,7 @@ void UTurinmaProgram::TestStop()
 
 	}
 }
-#endif
+
 
 void UTurinmaProgram::PostDuplicate(EDuplicateMode::Type DuplicateMode)
 {

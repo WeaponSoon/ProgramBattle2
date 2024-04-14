@@ -959,6 +959,8 @@ public:
 			NodeData->InputParams.AddDefaulted_GetRef().ParamPin = 100;
 		}
 	}
+#endif
+
 
 	UFUNCTION(BlueprintCallable)
 	static UTurinmaProgram* GenerateTestTurinmaProgram();
@@ -967,7 +969,7 @@ public:
 	static void TestRun(UTurinmaProgram* InProgram);
 	UFUNCTION(BlueprintCallable)
 	static void TestStop();
-#endif
+
 
 	virtual void PostDuplicate(EDuplicateMode::Type DuplicateMode) override;
 

@@ -384,6 +384,12 @@ struct TURINMALUA_API FTurinmaGraphHistory
 		return nullptr;
 	}
 
+	void Reset(UTurinmaProgram* InNew = nullptr)
+	{
+		ModifiedTurinmaGraph.Reset();
+		Program = InNew;
+	}
+
 	FTurinmaGraphData* ApplyGraph(FName InName)
 	{
 		if (Program)
@@ -450,7 +456,12 @@ public:
 	UFUNCTION(BlueprintCallable)
 	void BuildGraphPanel(FName InName);
 
-
+	UFUNCTION(BlueprintCallable)
+	void SetProgramForPanel(UTurinmaProgram* Program)
+	{
+		EditingProgram = Program;
+		HistoryBuffer.Reset(Program);
+	}
 
 
 	
