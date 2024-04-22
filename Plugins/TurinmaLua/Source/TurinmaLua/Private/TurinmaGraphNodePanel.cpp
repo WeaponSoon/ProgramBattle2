@@ -203,7 +203,7 @@ void UTurinmaGraphNodeBaseWidget::ResetUI()
 	}
 }
 
-FVector2D UTurinmaGraphNodeBaseWidget::GetWidgetLocationInOtherWidget(UWidget* Widget, UWidget* OtherWidget,
+FVector2D UTurinmaGraphNodeBaseWidget::GetWidgetLocationInOtherWidget(const UWidget* Widget, const UWidget* OtherWidget,
 	FVector2D Center)
 {
 	if(Widget)
@@ -215,7 +215,7 @@ FVector2D UTurinmaGraphNodeBaseWidget::GetWidgetLocationInOtherWidget(UWidget* W
 	return {};
 }
 
-FVector2D UTurinmaGraphNodeBaseWidget::GetExecInputPositionInPanel(UWidget* RelativeToWidget, FVector2D Center)
+FVector2D UTurinmaGraphNodeBaseWidget::GetExecInputPositionInPanel(const UWidget* RelativeToWidget, FVector2D Center)
 {
 	if(ExecInputPinWidget)
 	{
@@ -224,7 +224,7 @@ FVector2D UTurinmaGraphNodeBaseWidget::GetExecInputPositionInPanel(UWidget* Rela
 	return GetWidgetLocationInOtherWidget(this, RelativeToWidget, Center);
 }
 
-FVector2D UTurinmaGraphNodeBaseWidget::GetExecOutputPositionInPanel(UWidget* RelativeToWidget, int32 Index,
+FVector2D UTurinmaGraphNodeBaseWidget::GetExecOutputPositionInPanel(const UWidget* RelativeToWidget, int32 Index,
 	FVector2D Center)
 {
 	if(Index == 0)
@@ -241,7 +241,7 @@ FVector2D UTurinmaGraphNodeBaseWidget::GetExecOutputPositionInPanel(UWidget* Rel
 	return GetWidgetLocationInOtherWidget(this, RelativeToWidget, Center);
 }
 
-FVector2D UTurinmaGraphNodeBaseWidget::GetParamInputPositionInPanel(UWidget* RelativeToWidget, int32 Index,
+FVector2D UTurinmaGraphNodeBaseWidget::GetParamInputPositionInPanel(const UWidget* RelativeToWidget, int32 Index,
 	FVector2D Center)
 {
 	if(ParamInputWidget.IsValidIndex(Index))
@@ -251,7 +251,7 @@ FVector2D UTurinmaGraphNodeBaseWidget::GetParamInputPositionInPanel(UWidget* Rel
 	return GetWidgetLocationInOtherWidget(this, RelativeToWidget, Center);
 }
 
-FVector2D UTurinmaGraphNodeBaseWidget::GetParamOutputPositionInPanel(UWidget* RelativeToWidget, int32 Index,
+FVector2D UTurinmaGraphNodeBaseWidget::GetParamOutputPositionInPanel(const UWidget* RelativeToWidget, int32 Index,
 	FVector2D Center)
 {
 	if (ParamOutputWidget.IsValidIndex(Index))
@@ -273,11 +273,88 @@ void FTurinmaGraphDataRedoUndoItem::AddStructReferencedObjects(FReferenceCollect
 	}
 }
 
-int32 UTurinmaGraphCanvasPanel::NativeCustomPaintBeforePaintSlots(const FPaintArgs& Args,
-	const FGeometry& AllottedGeometry, const FSlateRect& MyCullingRect, FSlateWindowElementList& OutDrawElements,
-	int32 LayerId, const FWidgetStyle& InWidgetStyle, bool bParentEnabled) const
+void UTurinmaGraphCanvasPanel::UpdateLink() const
 {
+	auto&& CurDS = GetCachedGeometry().GetAbsoluteSize();
 
+	if(!bShouldRecalculateLinks && CurDS == DesiredSizeCache)
+	{
+		return;
+	}
+	DesiredSizeCache = CurDS;
+	bShouldRecalculateLinks = false;
+	WirelineDatas.Reset();
+	if(!ParentWidget)
+	{
+		return;
+	}
+	auto* CurGraphData = ParentWidget->HistoryBuffer.GetGraphDataByName(ParentWidget->CurrentPanelName);
+	if (CurGraphData)
+	{
+		for (auto&& Item : ParentWidget->NodeWidgets)
+		{
+			if (Item.Value && CurGraphData->NodeDatas.IsValidIndex(Item.Key))
+			{
+				auto&& NodeData = CurGraphData->NodeDatas[Item.Key];
+				if (!NodeData.NodeData->IsPure)
+				{
+					for (int NextNodeIndex = 0; NextNodeIndex < NodeData.NodeData->NextNodes.Num(); ++NextNodeIndex)
+					{
+						auto&& NextNode = NodeData.NodeData->NextNodes[NextNodeIndex];
+						if (CurGraphData->NodeDatas.IsValidIndex(NextNode.NextNode)
+							&& CurGraphData->NodeDatas[NextNode.NextNode].IsValid()
+							&& !CurGraphData->NodeDatas[NextNode.NextNode].NodeData->IsPure
+							&& CurGraphData->NodeDatas[NextNode.NextNode].NodeData->HasExecInput())
+						{
+							auto* Res = ParentWidget->NodeWidgets.Find(NextNode.NextNode);
+							if (Res && *Res)
+							{
+								FVector2D NextInputPos = (*Res)->GetExecInputPositionInPanel(this);
+								FVector2D CurOutputPos = Item.Value->GetExecOutputPositionInPanel(this, NextNodeIndex);
+								FVector2D StartDir(FMath::Max(NextInputPos.X - CurOutputPos.X, 100.0) * 2.0, 0);
+								WirelineDatas.Emplace(UTurinmaGraphCanvasPanel::FGraphNodeLinkWirelineData{
+									CurOutputPos,
+									StartDir,NextInputPos, StartDir, FLinearColor(1,1,1), 10 });
+							}
+						}
+					}
+				}
+				auto&& ParamInputs = NodeData.NodeData->InputParams;
+				for (int InputIndex = 0; InputIndex < ParamInputs.Num(); ++InputIndex)
+				{
+					auto&& ParamInput = ParamInputs[InputIndex];
+					if (CurGraphData->NodeDatas.IsValidIndex(ParamInput.ParamNode)
+						&& CurGraphData->NodeDatas[ParamInput.ParamNode].IsValid()
+						)
+					{
+						auto&& InputNodeOutputPins = CurGraphData->NodeDatas[ParamInput.ParamNode].NodeData->GetOutputParamDescs();
+						if (InputNodeOutputPins.IsValidIndex(ParamInput.ParamPin))
+						{
+							auto* Res = ParentWidget->NodeWidgets.Find(ParamInput.ParamNode);
+							if (Res && *Res)
+							{
+								FVector2D CurInputPinPos = Item.Value->GetParamInputPositionInPanel(this, InputIndex);
+								FVector2D InputNodeOutputPinPos = (*Res)->GetParamOutputPositionInPanel(this, ParamInput.ParamPin);
+								FVector2D StartDir(FMath::Max(CurInputPinPos.X - InputNodeOutputPinPos.X, 100.0) * 2.0, 0);
+								WirelineDatas.Emplace(UTurinmaGraphCanvasPanel::FGraphNodeLinkWirelineData{
+									InputNodeOutputPinPos,
+									StartDir,CurInputPinPos, StartDir, FLinearColor(0,1,0), 5 });
+
+							}
+						}
+					}
+				}
+
+			}
+		}
+	}
+}
+
+int32 UTurinmaGraphCanvasPanel::NativeCustomPaintAfterPaintSlots(const FPaintArgs& Args,
+                                                                  const FGeometry& AllottedGeometry, const FSlateRect& MyCullingRect, FSlateWindowElementList& OutDrawElements,
+                                                                  int32 LayerId, const FWidgetStyle& InWidgetStyle, bool bParentEnabled) const
+{
+	UpdateLink();
 	for (auto&& Item : WirelineDatas)
 	{
 		FSlateDrawElement::MakeSpline(OutDrawElements, LayerId, AllottedGeometry.ToPaintGeometry(),
@@ -289,6 +366,15 @@ int32 UTurinmaGraphCanvasPanel::NativeCustomPaintBeforePaintSlots(const FPaintAr
 	return LayerId;
 }
 
+
+void UTurinmaGraphPanelBaseWidget::NativeConstruct()
+{
+	Super::NativeConstruct();
+	if(GraphPanel)
+	{
+		GraphPanel->ParentWidget = this;
+	}
+}
 
 UTurinmaGraphPanelBaseWidget::UTurinmaGraphPanelBaseWidget(const FObjectInitializer& ObjectInitializer) : Super(ObjectInitializer)
 {
@@ -351,70 +437,7 @@ uint32 GetTypeHash(const FTurinmaNodeLinkItem& Item)
 
 void UTurinmaGraphPanelBaseWidget::UpdateLink()
 {
-	GraphPanel->WirelineDatas.Reset();
-	TSet<FTurinmaNodeLinkItem> Linked;
-	auto* CurGraphData = HistoryBuffer.GetGraphDataByName(CurrentPanelName);
-	if(CurGraphData)
-	{
-		for(auto&& Item : NodeWidgets)
-		{
-			if(Item.Value && CurGraphData->NodeDatas.IsValidIndex(Item.Key))
-			{
-				auto&& NodeData = CurGraphData->NodeDatas[Item.Key];
-				if(!NodeData.NodeData->IsPure)
-				{
-					for(int NextNodeIndex = 0; NextNodeIndex < NodeData.NodeData->NextNodes.Num(); ++NextNodeIndex)
-					{
-						auto&& NextNode = NodeData.NodeData->NextNodes[NextNodeIndex];
-						if(CurGraphData->NodeDatas.IsValidIndex(NextNode.NextNode)
-							&& CurGraphData->NodeDatas[NextNode.NextNode].IsValid()
-							&& !CurGraphData->NodeDatas[NextNode.NextNode].NodeData->IsPure
-							&& CurGraphData->NodeDatas[NextNode.NextNode].NodeData->HasExecInput())
-						{
-							auto* Res = NodeWidgets.Find(NextNode.NextNode);
-							if(Res && *Res)
-							{
-								FVector2D NextInputPos = (*Res)->GetExecInputPositionInPanel(GraphPanel);
-								FVector2D CurOutputPos = Item.Value->GetExecOutputPositionInPanel(GraphPanel, NextNodeIndex);
-								FVector2D StartDir(FMath::Max(NextInputPos.X - CurOutputPos.X, 50.0), 0);
-								GraphPanel->WirelineDatas.Emplace(UTurinmaGraphCanvasPanel::FGraphNodeLinkWirelineData{
-									CurOutputPos,
-									StartDir,NextInputPos, StartDir, FLinearColor(1,1,1), 10 });
-							}
-						}
-					}
-				}
-				auto&& ParamInputs = NodeData.NodeData->InputParams;
-				for (int InputIndex = 0; InputIndex < ParamInputs.Num(); ++InputIndex)
-				{
-					auto&& ParamInput = ParamInputs[InputIndex];
-					if(CurGraphData->NodeDatas.IsValidIndex(ParamInput.ParamNode)
-						&& CurGraphData->NodeDatas[ParamInput.ParamNode].IsValid()
-						)
-					{
-						auto&& InputNodeOutputPins = CurGraphData->NodeDatas[ParamInput.ParamNode].NodeData->GetOutputParamDescs();
-						if(InputNodeOutputPins.IsValidIndex(ParamInput.ParamPin))
-						{
-							auto* Res = NodeWidgets.Find(ParamInput.ParamNode);
-							if(Res && *Res)
-							{
-								FVector2D CurInputPinPos = Item.Value->GetParamInputPositionInPanel(GraphPanel, InputIndex);
-								FVector2D InputNodeOutputPinPos = (*Res)->GetParamOutputPositionInPanel(GraphPanel, ParamInput.ParamPin);
-								FVector2D StartDir(FMath::Max(CurInputPinPos.X - InputNodeOutputPinPos.X, 50.0), 0);
-								GraphPanel->WirelineDatas.Emplace(UTurinmaGraphCanvasPanel::FGraphNodeLinkWirelineData{
-									InputNodeOutputPinPos,
-									StartDir,CurInputPinPos, StartDir, FLinearColor(0,1,0), 5 });
-
-							}
-						}
-					}
-				}
-				
-			}
-		}
-	}
-
-	GraphPanel->bShouldCustomDraw = GraphPanel->WirelineDatas.Num() > 0;
+	GraphPanel->bShouldRecalculateLinks = true;
 }
 
 

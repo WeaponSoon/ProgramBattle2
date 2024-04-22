@@ -12,6 +12,8 @@
 #include "Components/VerticalBox.h"
 #include "TurinmaCommon.h"
 #include "TurinmaCustomPaintCanvasPanel.h"
+#include "Components/InvalidationBox.h"
+#include "Slate/SceneViewport.h"
 #include "TurinmaGraphNodePanel.generated.h"
 
 
@@ -244,16 +246,16 @@ public:
 	void ResetUI();
 
 	UFUNCTION(BlueprintPure)
-	static FVector2D GetWidgetLocationInOtherWidget(UWidget* Widget, UWidget* OtherWidget, FVector2D Center);
+	static FVector2D GetWidgetLocationInOtherWidget(const UWidget* Widget,const UWidget* OtherWidget, FVector2D Center);
 
 	UFUNCTION(BlueprintPure)
-	FVector2D GetExecInputPositionInPanel(UWidget* RelativeToWidget, FVector2D Center = FVector2D(0.5,0.5));
+	FVector2D GetExecInputPositionInPanel(const UWidget* RelativeToWidget, FVector2D Center = FVector2D(0.5,0.5));
 	UFUNCTION(BlueprintPure)
-	FVector2D GetExecOutputPositionInPanel(UWidget* RelativeToWidget, int32 Index, FVector2D Center = FVector2D(0.5, 0.5));
+	FVector2D GetExecOutputPositionInPanel(const UWidget* RelativeToWidget, int32 Index, FVector2D Center = FVector2D(0.5, 0.5));
 	UFUNCTION(BlueprintPure)
-	FVector2D GetParamInputPositionInPanel(UWidget* RelativeToWidget, int32 Index, FVector2D Center = FVector2D(0.5, 0.5));
+	FVector2D GetParamInputPositionInPanel(const UWidget* RelativeToWidget, int32 Index, FVector2D Center = FVector2D(0.5, 0.5));
 	UFUNCTION(BlueprintPure)
-	FVector2D GetParamOutputPositionInPanel(UWidget* RelativeToWidget, int32 Index, FVector2D Center = FVector2D(0.5, 0.5));
+	FVector2D GetParamOutputPositionInPanel(const UWidget* RelativeToWidget, int32 Index, FVector2D Center = FVector2D(0.5, 0.5));
 
 
 
@@ -450,13 +452,25 @@ public:
 		FLinearColor LineColor;
 		float LineThickness;
 	};
+	mutable FVector2D DesiredSizeCache;
+	mutable bool bShouldRecalculateLinks = true;
 
-	TArray<FGraphNodeLinkWirelineData> WirelineDatas;
+	UTurinmaGraphCanvasPanel()
+	{
+		bShouldCustomDraw = true;
+	}
 
-	virtual int32 NativeCustomPaintBeforePaintSlots(const FPaintArgs& Args, const FGeometry& AllottedGeometry, const FSlateRect& MyCullingRect, FSlateWindowElementList& OutDrawElements, int32 LayerId, const FWidgetStyle& InWidgetStyle, bool bParentEnabled) const override;
+	UPROPERTY(Transient)
+	UTurinmaGraphPanelBaseWidget* ParentWidget = nullptr;
+
+	mutable TArray<FGraphNodeLinkWirelineData> WirelineDatas;
 
 
-	virtual int32 NativeCustomPaintAfterPaintSlots(const FPaintArgs& Args, const FGeometry& AllottedGeometry, const FSlateRect& MyCullingRect, FSlateWindowElementList& OutDrawElements, int32 LayerId, const FWidgetStyle& InWidgetStyle, bool bParentEnabled) const override
+	void UpdateLink() const;
+
+	virtual int32 NativeCustomPaintAfterPaintSlots(const FPaintArgs& Args, const FGeometry& AllottedGeometry, const FSlateRect& MyCullingRect, FSlateWindowElementList& OutDrawElements, int32 LayerId, const FWidgetStyle& InWidgetStyle, bool bParentEnabled) const override;
+
+	virtual int32 NativeCustomPaintBeforePaintSlots(const FPaintArgs& Args, const FGeometry& AllottedGeometry, const FSlateRect& MyCullingRect, FSlateWindowElementList& OutDrawElements, int32 LayerId, const FWidgetStyle& InWidgetStyle, bool bParentEnabled) const override
 	{
 		return LayerId;
 	}
@@ -477,6 +491,8 @@ public:
 	TMap<int32, TObjectPtr<UTurinmaGraphNodeBaseWidget>> NodeWidgets;
 	UPROPERTY()
 	FName CurrentPanelName;
+
+	virtual void NativeConstruct() override;
 
 	UTurinmaGraphPanelBaseWidget(const FObjectInitializer& ObjectInitializer);
 
