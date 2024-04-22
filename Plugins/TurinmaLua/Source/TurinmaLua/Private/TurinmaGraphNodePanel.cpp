@@ -273,6 +273,22 @@ void FTurinmaGraphDataRedoUndoItem::AddStructReferencedObjects(FReferenceCollect
 	}
 }
 
+int32 UTurinmaGraphCanvasPanel::NativeCustomPaintBeforePaintSlots(const FPaintArgs& Args,
+	const FGeometry& AllottedGeometry, const FSlateRect& MyCullingRect, FSlateWindowElementList& OutDrawElements,
+	int32 LayerId, const FWidgetStyle& InWidgetStyle, bool bParentEnabled) const
+{
+
+	for (auto&& Item : WirelineDatas)
+	{
+		FSlateDrawElement::MakeSpline(OutDrawElements, LayerId, AllottedGeometry.ToPaintGeometry(),
+			Item.StartPos, Item.StartDir, Item.EndPos, Item.EndDir, Item.LineThickness + 2, ESlateDrawEffect::None, FLinearColor::Black);
+		FSlateDrawElement::MakeSpline(OutDrawElements, LayerId, AllottedGeometry.ToPaintGeometry(),
+			Item.StartPos, Item.StartDir, Item.EndPos, Item.EndDir, Item.LineThickness, ESlateDrawEffect::None, Item.LineColor);
+	}
+
+	return LayerId;
+}
+
 
 UTurinmaGraphPanelBaseWidget::UTurinmaGraphPanelBaseWidget(const FObjectInitializer& ObjectInitializer) : Super(ObjectInitializer)
 {
@@ -335,7 +351,7 @@ uint32 GetTypeHash(const FTurinmaNodeLinkItem& Item)
 
 void UTurinmaGraphPanelBaseWidget::UpdateLink()
 {
-	WirelineDatas.Reset();
+	GraphPanel->WirelineDatas.Reset();
 	TSet<FTurinmaNodeLinkItem> Linked;
 	auto* CurGraphData = HistoryBuffer.GetGraphDataByName(CurrentPanelName);
 	if(CurGraphData)
@@ -358,10 +374,10 @@ void UTurinmaGraphPanelBaseWidget::UpdateLink()
 							auto* Res = NodeWidgets.Find(NextNode.NextNode);
 							if(Res && *Res)
 							{
-								FVector2D NextInputPos = (*Res)->GetExecInputPositionInPanel(this);
-								FVector2D CurOutputPos = Item.Value->GetExecOutputPositionInPanel(this, NextNodeIndex);
+								FVector2D NextInputPos = (*Res)->GetExecInputPositionInPanel(GraphPanel);
+								FVector2D CurOutputPos = Item.Value->GetExecOutputPositionInPanel(GraphPanel, NextNodeIndex);
 								FVector2D StartDir(FMath::Max(NextInputPos.X - CurOutputPos.X, 50.0), 0);
-								WirelineDatas.Emplace(FGraphNodeLinkWirelineData{
+								GraphPanel->WirelineDatas.Emplace(UTurinmaGraphCanvasPanel::FGraphNodeLinkWirelineData{
 									CurOutputPos,
 									StartDir,NextInputPos, StartDir, FLinearColor(1,1,1), 10 });
 							}
@@ -382,10 +398,10 @@ void UTurinmaGraphPanelBaseWidget::UpdateLink()
 							auto* Res = NodeWidgets.Find(ParamInput.ParamNode);
 							if(Res && *Res)
 							{
-								FVector2D CurInputPinPos = Item.Value->GetParamInputPositionInPanel(this, InputIndex);
-								FVector2D InputNodeOutputPinPos = (*Res)->GetParamOutputPositionInPanel(this, ParamInput.ParamPin);
+								FVector2D CurInputPinPos = Item.Value->GetParamInputPositionInPanel(GraphPanel, InputIndex);
+								FVector2D InputNodeOutputPinPos = (*Res)->GetParamOutputPositionInPanel(GraphPanel, ParamInput.ParamPin);
 								FVector2D StartDir(FMath::Max(CurInputPinPos.X - InputNodeOutputPinPos.X, 50.0), 0);
-								WirelineDatas.Emplace(FGraphNodeLinkWirelineData{
+								GraphPanel->WirelineDatas.Emplace(UTurinmaGraphCanvasPanel::FGraphNodeLinkWirelineData{
 									InputNodeOutputPinPos,
 									StartDir,CurInputPinPos, StartDir, FLinearColor(0,1,0), 5 });
 
@@ -398,23 +414,9 @@ void UTurinmaGraphPanelBaseWidget::UpdateLink()
 		}
 	}
 
+	GraphPanel->bShouldCustomDraw = GraphPanel->WirelineDatas.Num() > 0;
 }
 
-int32 UTurinmaGraphPanelBaseWidget::NativePaint(const FPaintArgs& Args, const FGeometry& AllottedGeometry,
-	const FSlateRect& MyCullingRect, FSlateWindowElementList& OutDrawElements, int32 LayerId,
-	const FWidgetStyle& InWidgetStyle, bool bParentEnabled) const
-{
-	for(auto&& Item : WirelineDatas)
-	{
-		FSlateDrawElement::MakeSpline(OutDrawElements, LayerId, AllottedGeometry.ToPaintGeometry(),
-			Item.StartPos, Item.StartDir, Item.EndPos, Item.EndDir, Item.LineThickness + 2, ESlateDrawEffect::None, FLinearColor::Black);
-		FSlateDrawElement::MakeSpline(OutDrawElements, LayerId, AllottedGeometry.ToPaintGeometry(),
-			Item.StartPos, Item.StartDir, Item.EndPos, Item.EndDir, Item.LineThickness, ESlateDrawEffect::None, Item.LineColor);
-	}
-
-	return Super::NativePaint(Args, AllottedGeometry, MyCullingRect, OutDrawElements, LayerId, InWidgetStyle,
-	                          bParentEnabled);
-}
 
 void UTurinmaGraphPanelBaseWidget::AddReferencedObjects(UObject* InThis, FReferenceCollector& Collector)
 {

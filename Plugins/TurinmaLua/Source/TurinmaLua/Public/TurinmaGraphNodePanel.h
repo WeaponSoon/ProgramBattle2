@@ -11,6 +11,7 @@
 #include "Components/HorizontalBox.h"
 #include "Components/VerticalBox.h"
 #include "TurinmaCommon.h"
+#include "TurinmaCustomPaintCanvasPanel.h"
 #include "TurinmaGraphNodePanel.generated.h"
 
 
@@ -433,11 +434,11 @@ struct TURINMALUA_API FTurinmaGraphHistory
 };
 
 
-UCLASS(BlueprintType, Blueprintable)
-class TURINMALUA_API UTurinmaGraphPanelBaseWidget : public UUserWidget
+UCLASS()
+class TURINMALUA_API UTurinmaGraphCanvasPanel : public UTurinmaCustomPaintCanvasPanel
 {
 	GENERATED_BODY()
-
+public:
 
 	struct FGraphNodeLinkWirelineData
 	{
@@ -452,10 +453,25 @@ class TURINMALUA_API UTurinmaGraphPanelBaseWidget : public UUserWidget
 
 	TArray<FGraphNodeLinkWirelineData> WirelineDatas;
 
+	virtual int32 NativeCustomPaintBeforePaintSlots(const FPaintArgs& Args, const FGeometry& AllottedGeometry, const FSlateRect& MyCullingRect, FSlateWindowElementList& OutDrawElements, int32 LayerId, const FWidgetStyle& InWidgetStyle, bool bParentEnabled) const override;
+
+
+	virtual int32 NativeCustomPaintAfterPaintSlots(const FPaintArgs& Args, const FGeometry& AllottedGeometry, const FSlateRect& MyCullingRect, FSlateWindowElementList& OutDrawElements, int32 LayerId, const FWidgetStyle& InWidgetStyle, bool bParentEnabled) const override
+	{
+		return LayerId;
+	}
+};
+
+UCLASS(BlueprintType, Blueprintable)
+class TURINMALUA_API UTurinmaGraphPanelBaseWidget : public UUserWidget
+{
+	GENERATED_BODY()
+
+
 public:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, meta = (BindWidget))
-	TObjectPtr<UCanvasPanel> GraphPanel = nullptr;
+	TObjectPtr<UTurinmaGraphCanvasPanel> GraphPanel = nullptr;
 
 	UPROPERTY()
 	TMap<int32, TObjectPtr<UTurinmaGraphNodeBaseWidget>> NodeWidgets;
@@ -480,7 +496,7 @@ public:
 	UFUNCTION(BlueprintCallable)
 	void ResetGraphPanel()
 	{
-		WirelineDatas.Empty();
+		GraphPanel->WirelineDatas.Empty();
 		GraphPanel->ClearChildren();
 		NodeWidgets.Empty();
 		CurrentPanelName = NAME_None;
@@ -498,9 +514,6 @@ public:
 		EditingProgram = Program;
 		HistoryBuffer.Reset(Program);
 	}
-
-
-	virtual int32 NativePaint(const FPaintArgs& Args, const FGeometry& AllottedGeometry, const FSlateRect& MyCullingRect, FSlateWindowElementList& OutDrawElements, int32 LayerId, const FWidgetStyle& InWidgetStyle, bool bParentEnabled) const override;
 
 
 	static void AddReferencedObjects(UObject* InThis, FReferenceCollector& Collector);
