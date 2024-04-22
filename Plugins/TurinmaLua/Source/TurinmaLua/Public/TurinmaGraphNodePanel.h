@@ -237,8 +237,26 @@ public:
 		P_NATIVE_END;
 	}
 
+	UFUNCTION(BlueprintCallable)
 	void InitData();
+	UFUNCTION(BlueprintCallable)
 	void ResetUI();
+
+	UFUNCTION(BlueprintPure)
+	static FVector2D GetWidgetLocationInOtherWidget(UWidget* Widget, UWidget* OtherWidget, FVector2D Center);
+
+	UFUNCTION(BlueprintPure)
+	FVector2D GetExecInputPositionInPanel(UWidget* RelativeToWidget, FVector2D Center = FVector2D(0.5,0.5));
+	UFUNCTION(BlueprintPure)
+	FVector2D GetExecOutputPositionInPanel(UWidget* RelativeToWidget, int32 Index, FVector2D Center = FVector2D(0.5, 0.5));
+	UFUNCTION(BlueprintPure)
+	FVector2D GetParamInputPositionInPanel(UWidget* RelativeToWidget, int32 Index, FVector2D Center = FVector2D(0.5, 0.5));
+	UFUNCTION(BlueprintPure)
+	FVector2D GetParamOutputPositionInPanel(UWidget* RelativeToWidget, int32 Index, FVector2D Center = FVector2D(0.5, 0.5));
+
+
+
+
 };
 
 UCLASS(BlueprintType)
@@ -420,6 +438,20 @@ class TURINMALUA_API UTurinmaGraphPanelBaseWidget : public UUserWidget
 {
 	GENERATED_BODY()
 
+
+	struct FGraphNodeLinkWirelineData
+	{
+		FVector2D StartPos;
+		FVector2D StartDir;
+		FVector2D EndPos;
+		FVector2D EndDir;
+
+		FLinearColor LineColor;
+		float LineThickness;
+	};
+
+	TArray<FGraphNodeLinkWirelineData> WirelineDatas;
+
 public:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, meta = (BindWidget))
@@ -448,6 +480,7 @@ public:
 	UFUNCTION(BlueprintCallable)
 	void ResetGraphPanel()
 	{
+		WirelineDatas.Empty();
 		GraphPanel->ClearChildren();
 		NodeWidgets.Empty();
 		CurrentPanelName = NAME_None;
@@ -457,6 +490,9 @@ public:
 	void BuildGraphPanel(FName InName);
 
 	UFUNCTION(BlueprintCallable)
+	void UpdateLink();
+
+	UFUNCTION(BlueprintCallable)
 	void SetProgramForPanel(UTurinmaProgram* Program)
 	{
 		EditingProgram = Program;
@@ -464,7 +500,7 @@ public:
 	}
 
 
-	
+	virtual int32 NativePaint(const FPaintArgs& Args, const FGeometry& AllottedGeometry, const FSlateRect& MyCullingRect, FSlateWindowElementList& OutDrawElements, int32 LayerId, const FWidgetStyle& InWidgetStyle, bool bParentEnabled) const override;
 
 
 	static void AddReferencedObjects(UObject* InThis, FReferenceCollector& Collector);

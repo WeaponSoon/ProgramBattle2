@@ -421,6 +421,8 @@ struct TURINMALUA_API FTurinmaGraphNodeDataBase
 
 	virtual int32 DesiredNextNodesNumber() const { return 1; }
 
+	virtual bool HasExecInput() const { return true; }
+
 	virtual bool CanChangeNodeNameTo(const FString& InPendingName) { return false; }
 
 	virtual void ChangeNodeNameTo(FName InName) {};
@@ -551,6 +553,11 @@ struct FTurinmaGraphInputNodeData : public FTurinmaGraphNodeDataBase
 	virtual bool CanModifyOutputParamsDesc() const override
 	{
 		return true;
+	}
+
+	virtual bool HasExecInput() const override
+	{
+		return false;
 	}
 };
 
