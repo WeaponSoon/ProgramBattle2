@@ -432,6 +432,8 @@ struct TURINMALUA_API FTurinmaGraphNodeDataBase
 	virtual ~FTurinmaGraphNodeDataBase() = default;
 };
 
+template<typename T>
+concept IsTurinmaGraphNodeData = std::is_base_of_v<FTurinmaGraphNodeDataBase, T>;
 
 #define DECLARE_TURINMA_GRAPH_NODE(NodeType)\
 	typedef NodeType MyNodeType;\
@@ -898,6 +900,161 @@ struct TURINMALUA_API FTurinmaGraphData
 
 	TArray<FTurinmaNodeDataItem> NodeDatas;
 
+
+	bool RemoveNode(int32 Index)
+	{
+		if(NodeDatas.IsValidIndex(Index) && NodeDatas[Index].IsValid())
+		{
+			for (int32 I = 0; I < NodeDatas.Num(); ++I)
+			{
+				if (NodeDatas[I].IsValid())
+				{
+					for(auto&& Next : NodeDatas[I].NodeData->NextNodes)
+					{
+						if(Next.NextNode == Index)
+						{
+							Next.NextNode = INDEX_NONE;
+						}
+					}
+					for (auto&& Input : NodeDatas[I].NodeData->InputParams)
+					{
+						if (Input.ParamNode == Index)
+						{
+							Input.ParamNode = INDEX_NONE;
+						}
+					}
+				}
+			}
+			return true;
+		}
+		return false;
+	}
+
+	template<typename T>
+	T& AddNode(int* NodeIndex = nullptr) requires IsTurinmaGraphNodeData<T>
+	{
+		return *AddNode(T::StaticStruct(), NodeIndex, nullptr)->template GetTyped<T>();
+	}
+
+	template<typename T>
+	T& AddNode(const T& InData, int* NodeIndex = nullptr) requires IsTurinmaGraphNodeData<T>
+	{
+		return *AddNode(T::StaticStruct(), NodeIndex, &InData)->template GetTyped<T>();
+	}
+
+	FTurinmaGraphNodeDataBase* AddNode(UScriptStruct* NodeType, int* NodeIndex = nullptr, const FTurinmaGraphNodeDataBase* Data = nullptr)
+	{
+		if (!NodeType)
+		{
+			return nullptr;
+		}
+		if (Data && Data->GetDataType() != NodeType)
+		{
+			return nullptr;
+		}
+
+
+		for(int32 I = 0; I < NodeDatas.Num(); ++I)
+		{
+			auto&& Item = NodeDatas[I];
+			if(!Item.IsValid())
+			{
+				Item.SetData(NodeType, Data);
+				if(NodeIndex)
+				{
+					*NodeIndex = I;
+				}
+				return Item.NodeData;
+			}
+		}
+
+		auto&& Slot = NodeDatas.AddDefaulted_GetRef();
+		Slot.SetData(NodeType, Data);
+		if(NodeIndex)
+		{
+			*NodeIndex = NodeDatas.Num() - 1;
+		}
+		return Slot.NodeData;
+	}
+
+	template<typename T>
+	T* GetNode(int32 Index) requires IsTurinmaGraphNodeData<T>
+	{
+		auto* Ret = GetNode(Index);
+		if(Ret && Ret->GetDataType() == T::StaticStruct())
+		{
+			return Ret->GetTyped<T>();
+		}
+		return nullptr;
+	}
+
+	template<typename T>
+	const T* GetNode(int32 Index) const requires IsTurinmaGraphNodeData<T> 
+	{
+		auto* Ret = GetNode(Index);
+		if (Ret && Ret->GetDataType() == T::StaticStruct())
+		{
+			return Ret->GetTyped<T>();
+		}
+		return nullptr;
+	}
+
+	FTurinmaGraphNodeDataBase* GetNode(int32 Index)
+	{
+		if (NodeDatas.IsValidIndex(Index) && NodeDatas[Index].IsValid())
+		{
+			return NodeDatas[Index].NodeData;
+		}
+		return nullptr;
+	}
+
+	const FTurinmaGraphNodeDataBase* GetNode(int32 Index) const
+	{
+		return const_cast<FTurinmaGraphData*>(this)->GetNode(Index);
+	}
+
+	bool ForEachNode(const TFunction<bool(int32 Index, FTurinmaGraphNodeDataBase*)>& InFunctor, bool EvenIfInvalid = false)
+	{
+		if(InFunctor)
+		{
+			for(int32 I = 0; I < NodeDatas.Num(); ++I)
+			{
+				auto&& Item = NodeDatas[I];
+				if(EvenIfInvalid || Item.IsValid())
+				{
+					bool bShouldContinue = InFunctor(I, Item.NodeData);
+					if (!bShouldContinue)
+					{
+						return false;
+					}
+				}
+			}
+			return true;
+		}
+		return false;
+	}
+
+	bool ForEachNode(const TFunction<bool(int32 Index, const FTurinmaGraphNodeDataBase*)>& InFunctor, bool EvenIfInvalid = false) const
+	{
+		if (InFunctor)
+		{
+			for (int32 I = 0; I < NodeDatas.Num(); ++I)
+			{
+				auto&& Item = NodeDatas[I];
+				if (EvenIfInvalid || Item.IsValid())
+				{
+					bool bShouldContinue = InFunctor(I, Item.NodeData);
+					if(!bShouldContinue)
+					{
+						return false;
+					}
+				}
+			}
+			return true;
+		}
+		return false;
+	}
+
 	void Init(UTurinmaProgram* Program);
 
 	void InitInoutPut();
@@ -958,12 +1115,8 @@ public:
 	{
 		for(auto&& Graph : GraphDatas)
 		{
-			auto&& Data = Graph.NodeDatas.AddDefaulted_GetRef();
-			Data.NodeType = FTurinmaGraphInputNodeData::StaticStruct();
-			FTurinmaGraphInputNodeData* NodeData = (FTurinmaGraphInputNodeData*)FMemory::Malloc(Data.NodeType->GetStructureSize());
-			Data.NodeType->InitializeStruct(NodeData);
-			Data.NodeData = NodeData;
-			NodeData->InputParams.AddDefaulted_GetRef().ParamPin = 100;
+			auto&& Data = Graph.AddNode<FTurinmaGraphInputNodeData>();
+			Data.InputParams.AddDefaulted_GetRef().ParamPin = 100;
 		}
 	}
 #endif

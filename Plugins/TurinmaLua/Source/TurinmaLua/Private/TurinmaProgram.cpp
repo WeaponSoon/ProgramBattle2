@@ -359,9 +359,9 @@ TArray<FTurinmaGraphNodeParamDescInfo> FTurinmaCallGraphNodeData::GetInputParamD
 		if(Res && ProgramIn->GraphDatas.IsValidIndex(*Res))
 		{
 			auto&& GraphData = ProgramIn->GraphDatas[*Res];
-			if(GraphData.NodeDatas.IsValidIndex(GraphData.StartNodeIndex))
+			if(auto* Node = GraphData.GetNode(GraphData.StartNodeIndex))// NodeDatas.IsValidIndex(GraphData.StartNodeIndex))
 			{
-				return GraphData.NodeDatas[GraphData.StartNodeIndex].NodeData->GetOutputParamDescs();
+				return Node->GetOutputParamDescs();
 			}
 		}
 	}
@@ -376,9 +376,9 @@ TArray<FTurinmaGraphNodeParamDescInfo> FTurinmaCallGraphNodeData::GetOutputParam
 		if (Res && ProgramIn->GraphDatas.IsValidIndex(*Res))
 		{
 			auto&& GraphData = ProgramIn->GraphDatas[*Res];
-			if (GraphData.NodeDatas.IsValidIndex(GraphData.EndNodeIndex))
+			if (auto* Node = GraphData.GetNode(GraphData.EndNodeIndex))//.NodeDatas.IsValidIndex(GraphData.EndNodeIndex))
 			{
-				return GraphData.NodeDatas[GraphData.EndNodeIndex].NodeData->GetInputParamDescs();
+				return Node->GetInputParamDescs();
 			}
 		}
 	}
@@ -616,28 +616,34 @@ bool FTurinmaGraph::InitWithDataAndInfo(const FTurinmaGraphData& InData, const F
 {
 	DataIndex = InInfo.DataIndex;
 	GraphIndex = InInfo.GraphIndex;
-	for(int NodeDataIndx = 0; NodeDataIndx < InData.NodeDatas.Num(); ++NodeDataIndx)
+
+	bool IterRes = InData.ForEachNode([this](int32 NodeDataIndx, const FTurinmaGraphNodeDataBase* Data)->bool
+		{
+			auto&& Item = *Data;
+			//auto&& Item = InData.NodeDatas[NodeDataIndx];
+			int32 NodeIndx = Nodes.Num();
+			if (!Item.IsInputMatch())
+			{
+				return false;
+			}
+			if (Item.GetDataType() == FTurinmaGraphInputNodeData::StaticStruct())
+			{
+				if (StartNodeIndex == INDEX_NONE)
+				{
+					StartNodeIndex = NodeIndx;
+				}
+				else
+				{
+					return false; //no more than one input node
+				}
+			}
+			Nodes.Add( const_cast<FTurinmaGraphNodeDataBase&>(Item).CreateNode({ NodeDataIndx , NodeIndx }));
+			return true;
+		});
+	if(!IterRes)
 	{
-		auto&& Item = InData.NodeDatas[NodeDataIndx];
-		int32 NodeIndx = Nodes.Num();
-		if(!Item.NodeData->IsInputMatch())
-		{
-			Nodes.Empty();
-			return false;
-		}
-		if(Item.NodeType == FTurinmaGraphInputNodeData::StaticStruct())
-		{
-			if(StartNodeIndex == INDEX_NONE)
-			{
-				StartNodeIndex = NodeIndx;
-			}
-			else
-			{
-				Nodes.Empty();
-				return false; //no more than one input node
-			}
-		}
-		Nodes.Add(Item.NodeData->CreateNode({ NodeDataIndx , NodeIndx}));
+		Nodes.Empty();
+		return false;
 	}
 	if(StartNodeIndex != INDEX_NONE)
 	{
@@ -675,56 +681,46 @@ UTurinmaProgram* UTurinmaProgram::GenerateTestTurinmaProgram()
 	{
 		auto&& Graph0 = Ret->GraphDatas.AddDefaulted_GetRef();
 		Graph0.GraphName = TEXT("Graph0");
-		auto&& Graph0Begin = Graph0.NodeDatas.AddDefaulted_GetRef();
-		int32 BeginNodeIndex = Graph0.NodeDatas.Num() - 1;
 
-		FTurinmaGraphInputNodeData Input;
-		auto&& Param = Input.OutputParamDesc.AddDefaulted_GetRef();
+		int32 BeginNodeIndex = 0;
+		auto&& Graph0Begin = Graph0.AddNode<FTurinmaGraphInputNodeData>(&BeginNodeIndex);//.NodeDatas.AddDefaulted_GetRef();
+		auto&& Param = Graph0Begin.OutputParamDesc.AddDefaulted_GetRef();
 		Param.ValueType = ETurinmaValueType::Int;
 		Param.ParamName = TEXT("Test");
-		Graph0Begin.SetData(Input);
 
-		FTurinmaOutputLogGraphNodeData LogNode;
-		auto&& LogNodeParam = LogNode.InputParams.AddDefaulted_GetRef();
+		int32 LogNodeIndex = 0;
+		auto&& Graph0LogNode = Graph0.AddNode<FTurinmaOutputLogGraphNodeData>(&LogNodeIndex);//NodeDatas.AddDefaulted_GetRef();
+		auto&& LogNodeParam = Graph0LogNode.InputParams.AddDefaulted_GetRef();
 		LogNodeParam.ParamNode = BeginNodeIndex;
 		LogNodeParam.ParamPin = 0;
-		auto&& Graph0LogNode = Graph0.NodeDatas.AddDefaulted_GetRef();
-		int32 LogNodeIndex = Graph0.NodeDatas.Num() - 1;
-		Graph0LogNode.SetData(LogNode);
+		
 
-
-
-		Graph0Begin.NodeData->NextNodes.AddDefaulted_GetRef().NextNode = LogNodeIndex;
+		Graph0Begin.NextNodes.AddDefaulted_GetRef().NextNode = LogNodeIndex;
 
 	}
 	{
 		auto&& GraphMain = Ret->GraphDatas.AddDefaulted_GetRef();
 		GraphMain.GraphName = TEXT("Main");
-		auto&& GraphMainBegin = GraphMain.NodeDatas.AddDefaulted_GetRef();
-		GraphMainBegin.SetData(FTurinmaGraphInputNodeData());
-		GraphMainBegin.NodeData->Location = FVector2D(-400,0);
+
+		auto&& GraphMainBegin = GraphMain.AddNode<FTurinmaGraphInputNodeData>();// NodeDatas.AddDefaulted_GetRef();
+		GraphMainBegin.Location = FVector2D(-400,0);
+
+		int32 CallNodeIndex = 0;
+		auto&& GraphMainCallGraph0Node = GraphMain.AddNode<FTurinmaCallGraphNodeData>(&CallNodeIndex);// NodeDatas.AddDefaulted_GetRef();
+		GraphMainCallGraph0Node.GraphName = TEXT("Graph0");
+		GraphMainCallGraph0Node.Location = FVector2D(400, 400);
+
+		int32 LexicalIntIndex = 0;
+		auto&& GraphMainLexicalIntNode = GraphMain.AddNode<FTurinmaLexicalIntGraphNodeData>(&LexicalIntIndex);// .NodeDatas.AddDefaulted_GetRef();
+		GraphMainLexicalIntNode.LexicalInt = 100;
+		GraphMainLexicalIntNode.IsPure = true;
+		GraphMainLexicalIntNode.Location = FVector2D(0, -200);
 
 
-		FTurinmaCallGraphNodeData CallNode;
-		CallNode.GraphName = TEXT("Graph0");
-		auto&& GraphMainCallGraph0Node = GraphMain.NodeDatas.AddDefaulted_GetRef();
-		int32 CallNodeIndex = GraphMain.NodeDatas.Num() - 1;
-		GraphMainCallGraph0Node.SetData(CallNode);
-		GraphMainCallGraph0Node.NodeData->Location = FVector2D(400, 400);
-
-		auto&& GraphMainLexicalIntNode = GraphMain.NodeDatas.AddDefaulted_GetRef();
-		int32 LexicalIntIndex = GraphMain.NodeDatas.Num() - 1;
-		FTurinmaLexicalIntGraphNodeData LexicalInt;
-		LexicalInt.LexicalInt = 100;
-		LexicalInt.IsPure = true;
-		GraphMainLexicalIntNode.SetData(LexicalInt);
-		GraphMainLexicalIntNode.NodeData->Location = FVector2D(0, -200);
-
-
-		auto&& LinkToCallGraph0 = GraphMainBegin.NodeData->NextNodes.AddDefaulted_GetRef();
+		auto&& LinkToCallGraph0 = GraphMainBegin.NextNodes.AddDefaulted_GetRef();
 		LinkToCallGraph0.NextNode = CallNodeIndex;
 
-		auto&& ParamLinkToCall = GraphMainCallGraph0Node.NodeData->InputParams.AddDefaulted_GetRef();
+		auto&& ParamLinkToCall = GraphMainCallGraph0Node.InputParams.AddDefaulted_GetRef();
 		ParamLinkToCall.ParamNode = LexicalIntIndex;
 		ParamLinkToCall.ParamPin = 0;
 	}
@@ -905,9 +901,9 @@ bool FTurinmaProcess::IsNodeValid(int32 GraphIndex, int32 NodeIndex)
 		{
 			if(Graphs[GraphIndex].Nodes[NodeIndex].IsValid())
 			{
-				if(Program->GraphDatas[Graphs[GraphIndex].DataIndex].NodeDatas.IsValidIndex(Graphs[GraphIndex].Nodes[NodeIndex]->DataIndex))
+				if(auto* Node = Program->GraphDatas[Graphs[GraphIndex].DataIndex].GetNode(Graphs[GraphIndex].Nodes[NodeIndex]->DataIndex))
 				{
-					return !!Program->GraphDatas[Graphs[GraphIndex].DataIndex].NodeDatas[Graphs[GraphIndex].Nodes[NodeIndex]->DataIndex].NodeData;
+					return !!Node;
 				}
 			}
 		}
@@ -919,7 +915,7 @@ bool FTurinmaProcess::IsNodePure(int32 GraphIndex, int32 NodeIndex)
 {
 	if(IsNodeValid(GraphIndex, NodeIndex))
 	{
-		return Program->GraphDatas[Graphs[GraphIndex].DataIndex].NodeDatas[Graphs[GraphIndex].Nodes[NodeIndex]->DataIndex].NodeData->IsPure;
+		return Program->GraphDatas[Graphs[GraphIndex].DataIndex].GetNode(Graphs[GraphIndex].Nodes[NodeIndex]->DataIndex)->IsPure;
 	}
 	return false;
 }
@@ -986,7 +982,7 @@ FTurinmaCoroutine FTurinmaProcess::Execute()
 {
 	int32 CurLeftExecuteNum = MaxNumExecutePerTick;
 	int32 CurLeftCountBeforeGC = MaxGCProcessCount;
-	while (!bShouldExit && !ErrorInfo.bError)
+	while (!bShouldExit && !ErrorInfo.bError && Program.IsValid())
 	{
 		if (CallInfos.IsValidIndex(CurCallInfo) && CallInfos[CurCallInfo].CallStack.Num() > 0)
 		{
@@ -998,7 +994,7 @@ FTurinmaCoroutine FTurinmaProcess::Execute()
 				auto&& NodeItem = CallItem.LocalNodeIndex.Last();
 
 				auto&& Node = Graphs[CallItem.GraphIndex].Nodes[NodeItem.NodeIndex];
-				auto&& NodeData = Program->GraphDatas[Graphs[CallItem.GraphIndex].DataIndex].NodeDatas[NodeItem.NodeIndex];
+				auto&& NodeData = *Program->GraphDatas[Graphs[CallItem.GraphIndex].DataIndex].GetNode(NodeItem.NodeIndex);
 
 				{
 					switch (NodeItem.Status)
@@ -1009,9 +1005,9 @@ FTurinmaCoroutine FTurinmaProcess::Execute()
 					case FTurinmaProcessCallInfoItem::FLocalNodeIndex::ELocalNodeIndexStatus::PeekingParams:
 					{
 						bool bNeedFutureExecuteOrError = false;
-						while (NodeItem.NodeInput.Num() < NodeData.NodeData->InputParams.Num())
+						while (NodeItem.NodeInput.Num() < NodeData.InputParams.Num())
 						{
-							auto&& Param = NodeData.NodeData->InputParams[NodeItem.NodeInput.Num()];
+							auto&& Param = NodeData.InputParams[NodeItem.NodeInput.Num()];
 							auto Res = CallItem.TempLocalVariables.Find(Param.ParamNode);
 							if (!Res)
 							{
@@ -1077,7 +1073,7 @@ FTurinmaCoroutine FTurinmaProcess::Execute()
 					case FTurinmaProcessCallInfoItem::FLocalNodeIndex::ELocalNodeIndexStatus::PushingResult:
 					{
 						auto&& V = CallItem.TempLocalVariables.FindOrAdd(NodeItem.NodeIndex);
-						auto&& OutputParams = NodeData.NodeData->GetOutputParamDescs();
+						auto&& OutputParams = NodeData.GetOutputParamDescs();
 						V.Reset(OutputParams.Num());
 						if (NodeItem.NodeOutput.Num() != OutputParams.Num())
 						{
@@ -1111,9 +1107,9 @@ FTurinmaCoroutine FTurinmaProcess::Execute()
 					{
 						if (NodeItem.WhichNextToGo != INDEX_NONE)
 						{
-							if (NodeData.NodeData->NextNodes.IsValidIndex(NodeItem.WhichNextToGo))
+							if (NodeData.NextNodes.IsValidIndex(NodeItem.WhichNextToGo))
 							{
-								auto NextNode = NodeData.NodeData->NextNodes[NodeItem.WhichNextToGo];
+								auto NextNode = NodeData.NextNodes[NodeItem.WhichNextToGo];
 								if (IsNodeValid(CallItem.GraphIndex, NextNode.NextNode))
 								{
 									if (IsNodePure(CallItem.GraphIndex, NextNode.NextNode))
