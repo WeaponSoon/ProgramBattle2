@@ -293,18 +293,18 @@ void UTurinmaGraphCanvasPanel::UpdateLink() const
 	{
 		for (auto&& Item : ParentWidget->NodeWidgets)
 		{
-			if (Item.Value && CurGraphData->NodeDatas.IsValidIndex(Item.Key))
+			if (Item.Value && CurGraphData->GetNode(Item.Key))
 			{
-				auto&& NodeData = CurGraphData->NodeDatas[Item.Key];
-				if (!NodeData.NodeData->IsPure)
+				auto&& NodeData = CurGraphData->GetNode(Item.Key);
+				if (!NodeData->IsPure)
 				{
-					for (int NextNodeIndex = 0; NextNodeIndex < NodeData.NodeData->NextNodes.Num(); ++NextNodeIndex)
+					for (int NextNodeIndex = 0; NextNodeIndex < NodeData->NextNodes.Num(); ++NextNodeIndex)
 					{
-						auto&& NextNode = NodeData.NodeData->NextNodes[NextNodeIndex];
-						if (CurGraphData->NodeDatas.IsValidIndex(NextNode.NextNode)
-							&& CurGraphData->NodeDatas[NextNode.NextNode].IsValid()
-							&& !CurGraphData->NodeDatas[NextNode.NextNode].NodeData->IsPure
-							&& CurGraphData->NodeDatas[NextNode.NextNode].NodeData->HasExecInput())
+						auto&& NextNode = NodeData->NextNodes[NextNodeIndex];
+						auto* NextNodeNode = CurGraphData->GetNode(NextNode.NextNode);
+						if (NextNodeNode 
+							&& !NextNodeNode->IsPure
+							&& NextNodeNode->HasExecInput())
 						{
 							auto* Res = ParentWidget->NodeWidgets.Find(NextNode.NextNode);
 							if (Res && *Res)
@@ -319,15 +319,15 @@ void UTurinmaGraphCanvasPanel::UpdateLink() const
 						}
 					}
 				}
-				auto&& ParamInputs = NodeData.NodeData->InputParams;
+				auto&& ParamInputs = NodeData->InputParams;
 				for (int InputIndex = 0; InputIndex < ParamInputs.Num(); ++InputIndex)
 				{
 					auto&& ParamInput = ParamInputs[InputIndex];
-					if (CurGraphData->NodeDatas.IsValidIndex(ParamInput.ParamNode)
-						&& CurGraphData->NodeDatas[ParamInput.ParamNode].IsValid()
+					auto* ParamNode = CurGraphData->GetNode(ParamInput.ParamNode);
+					if (ParamNode
 						)
 					{
-						auto&& InputNodeOutputPins = CurGraphData->NodeDatas[ParamInput.ParamNode].NodeData->GetOutputParamDescs();
+						auto&& InputNodeOutputPins = ParamNode->GetOutputParamDescs();
 						if (InputNodeOutputPins.IsValidIndex(ParamInput.ParamPin))
 						{
 							auto* Res = ParentWidget->NodeWidgets.Find(ParamInput.ParamNode);
@@ -395,27 +395,27 @@ void UTurinmaGraphPanelBaseWidget::BuildGraphPanel(FName InName)
 	{
 		CurrentPanelName = InName;
 
-		auto&& NodeDatas = CurGraphData->NodeDatas;
-		for(int32 NodeIndex = 0; NodeIndex < NodeDatas.Num(); ++NodeIndex)
+		CurGraphData->ForEachNode([this, InName](int32 NodeIndex, const FTurinmaGraphNodeDataBase* NodeData)->bool
 		{
-			auto&& NodeData = NodeDatas[NodeIndex];
-			if(NodeData.IsValid())
-			{
-				auto&& NodeWidgetType = GraphNodeDataToGraphNodeWidgetType->ResolveWidgetTypeByClass(NodeData.NodeType);
-				UTurinmaGraphNodeBaseWidget* NodeW = CreateWidget<UTurinmaGraphNodeBaseWidget>(this, NodeWidgetType, NodeData.NodeData->GetNodeName());
-				NodeW->NodeItem.NodeIndex = NodeIndex;
-				NodeW->NodeItem.Graph.GraphPanel = this;
-				NodeW->NodeItem.Graph.GraphName = InName;
-				UCanvasPanelSlot* SlotW = GraphPanel->AddChildToCanvas(NodeW);
-				NodeWidgets.Add(NodeIndex, NodeW);
-				SlotW->SetAlignment(FVector2D(0.5f, 0.5f));
-				SlotW->SetAnchors(FAnchors(0.5f, 0.5f, 0.5f, 0.5f));
-				SlotW->SetPosition(NodeData.NodeData->Location);
-				SlotW->SetSize(NodeData.NodeData->Size);
+				if (NodeData)
+				{
+					auto&& NodeWidgetType = GraphNodeDataToGraphNodeWidgetType->ResolveWidgetTypeByClass(NodeData->GetDataType());
+					UTurinmaGraphNodeBaseWidget* NodeW = CreateWidget<UTurinmaGraphNodeBaseWidget>(this, NodeWidgetType, NodeData->GetNodeName());
+					NodeW->NodeItem.NodeIndex = NodeIndex;
+					NodeW->NodeItem.Graph.GraphPanel = this;
+					NodeW->NodeItem.Graph.GraphName = InName;
+					UCanvasPanelSlot* SlotW = GraphPanel->AddChildToCanvas(NodeW);
+					NodeWidgets.Add(NodeIndex, NodeW);
+					SlotW->SetAlignment(FVector2D(0.5f, 0.5f));
+					SlotW->SetAnchors(FAnchors(0.5f, 0.5f, 0.5f, 0.5f));
+					SlotW->SetPosition(NodeData->Location);
+					SlotW->SetSize(NodeData->Size);
 
-				NodeW->InitData();
-			}
-		}
+					NodeW->InitData();
+				}
+				return true;
+		});
+
 		UpdateLink();
 	}
 }

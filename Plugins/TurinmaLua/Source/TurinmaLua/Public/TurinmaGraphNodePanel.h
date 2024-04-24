@@ -125,10 +125,7 @@ struct TURINMALUA_API FTurinmaGraphNodeItem
 		auto&& GraphData = Graph.GetGraphData();
 		if(GraphData)
 		{
-			if(GraphData->NodeDatas.IsValidIndex(NodeIndex))
-			{
-				return GraphData->NodeDatas[NodeIndex].NodeData;
-			}
+			return GraphData->GetNode(NodeIndex);
 		}
 		return nullptr;
 	}

@@ -245,7 +245,7 @@ struct FTurinmaStructValue : FTurinmaHeapValue
 
 
 #define DECLARE_TURINMA_GRAPH_NODE_DATA(DataType)\
-	virtual UStruct* GetDataType() const override\
+	virtual UScriptStruct* GetDataType() const override\
 	{\
 		return StaticStruct();\
 	}\
@@ -399,7 +399,7 @@ struct TURINMALUA_API FTurinmaGraphNodeDataBase
 		return nullptr;
 	}
 
-	virtual UStruct* GetDataType() const
+	virtual UScriptStruct* GetDataType() const
 	{
 		return StaticStruct();
 	}
@@ -690,7 +690,7 @@ struct TURINMALUA_API FTurinmaGraphData
 
 	UPROPERTY(Transient)
 	int32 EndNodeIndex = INDEX_NONE;
-
+private:
 	enum class FTurinmaGraphDataVersion : uint16
 	{
 		First,
@@ -899,7 +899,7 @@ struct TURINMALUA_API FTurinmaGraphData
 	FTurinmaGraphDataVersion Version = FTurinmaGraphDataVersion::Last;
 
 	TArray<FTurinmaNodeDataItem> NodeDatas;
-
+public:
 
 	bool RemoveNode(int32 Index)
 	{
