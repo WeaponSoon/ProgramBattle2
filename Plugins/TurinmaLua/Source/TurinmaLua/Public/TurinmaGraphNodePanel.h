@@ -106,7 +106,7 @@ struct TURINMALUA_API FTurinmaGraphItem
 	UPROPERTY(EditAnywhere)
 	FName GraphName = NAME_None;
 
-	FTurinmaGraphData* GetGraphData();
+	FTurinmaGraphData* GetGraphData() const;
 };
 
 USTRUCT(BlueprintType)
@@ -120,7 +120,12 @@ struct TURINMALUA_API FTurinmaGraphNodeItem
 	UPROPERTY(EditAnywhere)
 	int32 NodeIndex = INDEX_NONE;
 
-	FTurinmaGraphNodeDataBase* GetGraphNodeData()
+	UTurinmaGraphPanelBaseWidget* GetPanelWidget() const
+	{
+		return Graph.GraphPanel;
+	}
+
+	FTurinmaGraphNodeDataBase* GetGraphNodeData() const
 	{
 		auto&& GraphData = Graph.GetGraphData();
 		if(GraphData)
@@ -133,15 +138,25 @@ struct TURINMALUA_API FTurinmaGraphNodeItem
 };
 
 
+UCLASS()
+class TURINMALUA_API UTurinmaPinClickablePanel : public UTurinmaClickableContentPanel
+{
+	GENERATED_BODY()
+
+public:
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+	ETurinmaPinKind PinKind = ETurinmaPinKind::None;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+	int32 Index = INDEX_NONE;
+};
+
 
 UCLASS(BlueprintType, Blueprintable)
 class TURINMALUA_API UTurinmaGraphNodeBaseWidget : public UUserWidget
 {
 	GENERATED_BODY()
 
-	friend class STurinmaGraphNodeSlate;
-
-	TSharedPtr<STurinmaGraphNodeSlate> MySlate;
 
 public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Data)
@@ -254,9 +269,16 @@ public:
 	UFUNCTION(BlueprintPure)
 	FVector2D GetParamOutputPositionInPanel(const UWidget* RelativeToWidget, int32 Index, FVector2D Center = FVector2D(0.5, 0.5));
 
+	UFUNCTION()
+	void OnPinHovered(UTurinmaClickableContentPanel* Panel, const FGeometry& MyGeometry, const FPointerEvent& MouseEvent);
 
+	UFUNCTION()
+	void OnPinUnhovered(UTurinmaClickableContentPanel* Panel, const FPointerEvent& MouseEvent);
 
-
+	UFUNCTION()
+	FEventReply OnPinDown(UTurinmaClickableContentPanel* Panel, const FGeometry& MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION()
+	FEventReply OnPinUp(UTurinmaClickableContentPanel* Panel, const FGeometry& MyGeometry, const FPointerEvent& MouseEvent);
 };
 
 UCLASS(BlueprintType)

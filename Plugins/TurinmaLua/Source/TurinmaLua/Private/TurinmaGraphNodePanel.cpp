@@ -2,11 +2,13 @@
 
 #include "MotionDelayBuffer.h"
 #include "Blueprint/WidgetTree.h"
+#include "Components/Border.h"
+#include "Components/BorderSlot.h"
 #include "Components/CanvasPanelSlot.h"
 
 UE_DISABLE_OPTIMIZATION
 
-FTurinmaGraphData* FTurinmaGraphItem::GetGraphData()
+FTurinmaGraphData* FTurinmaGraphItem::GetGraphData() const
 {
 	if (!GraphPanel)
 	{
@@ -74,7 +76,10 @@ void UTurinmaGraphNodeBaseWidget::InitData()
 				TitleWidget = WidgetTree->ConstructWidget<UWidget>(TitleClass);
 				if (TitleWidget)
 				{
-					TitleContainer->AddChild(TitleWidget);
+					UTurinmaClickableContentPanel* Border = WidgetTree->ConstructWidget<UTurinmaClickableContentPanel>(UTurinmaClickableContentPanel::StaticClass());
+					Border->Background.DrawAs = ESlateBrushDrawType::NoDrawType;
+					TitleContainer->AddChild(Border);
+					Cast<UBorderSlot>(Border->AddChild(TitleWidget))->SetPadding(FMargin(0,0,0,0));
 				}
 			}
 		}
@@ -91,7 +96,16 @@ void UTurinmaGraphNodeBaseWidget::InitData()
 				ExecInputPinWidget = WidgetTree->ConstructWidget<UWidget>(ExecInputPinClass);
 				if (ExecInputPinWidget)
 				{
-					ExecInputContainer->AddChild(ExecInputPinWidget);
+					UTurinmaPinClickablePanel* Border = WidgetTree->ConstructWidget<UTurinmaPinClickablePanel>(UTurinmaPinClickablePanel::StaticClass());
+					Border->PinKind = ETurinmaPinKind::ExecInput;
+					Border->Index = 0;
+					Border->OnHovered.AddUniqueDynamic(this, &UTurinmaGraphNodeBaseWidget::OnPinHovered);
+					Border->OnUnhovered.AddUniqueDynamic(this, &UTurinmaGraphNodeBaseWidget::OnPinUnhovered);
+					Border->OnMouseButtonDownEventWithWidget.BindDynamic(this, &UTurinmaGraphNodeBaseWidget::OnPinDown);
+					Border->OnMouseButtonUpEventWithWidget.BindDynamic(this, &UTurinmaGraphNodeBaseWidget::OnPinUp);
+					Border->Background.DrawAs = ESlateBrushDrawType::NoDrawType;
+					ExecInputContainer->AddChild(Border);
+					Cast<UBorderSlot>(Border->AddChild(ExecInputPinWidget))->SetPadding(FMargin(0,0,0,0));
 				}
 			}
 		}
@@ -102,7 +116,16 @@ void UTurinmaGraphNodeBaseWidget::InitData()
 				ExecOutputPinWidget = WidgetTree->ConstructWidget<UWidget>(ExecOutputPinClass);
 				if (ExecOutputPinWidget)
 				{
-					ExecOutputContainer->AddChild(ExecOutputPinWidget);
+					UTurinmaPinClickablePanel* Border = WidgetTree->ConstructWidget<UTurinmaPinClickablePanel>(UTurinmaPinClickablePanel::StaticClass());
+					Border->PinKind = ETurinmaPinKind::ExecOutput;
+					Border->Index = 0;
+					Border->OnHovered.AddUniqueDynamic(this, &UTurinmaGraphNodeBaseWidget::OnPinHovered);
+					Border->OnUnhovered.AddUniqueDynamic(this, &UTurinmaGraphNodeBaseWidget::OnPinUnhovered);
+					Border->OnMouseButtonDownEventWithWidget.BindDynamic(this, &UTurinmaGraphNodeBaseWidget::OnPinDown);
+					Border->OnMouseButtonUpEventWithWidget.BindDynamic(this, &UTurinmaGraphNodeBaseWidget::OnPinUp);
+					Border->Background.DrawAs = ESlateBrushDrawType::NoDrawType;
+					ExecOutputContainer->AddChild(Border);
+					Cast<UBorderSlot>(Border->AddChild(ExecOutputPinWidget))->SetPadding(FMargin(0,0,0,0));
 				}
 			}
 		}
@@ -113,7 +136,16 @@ void UTurinmaGraphNodeBaseWidget::InitData()
 				auto* ExtraExecOutputPinWidget = WidgetTree->ConstructWidget<UWidget>(ExecOutputPinClass);
 				if (ExtraExecOutputPinWidget)
 				{
-					ExtraExecOutputContainer->AddChild(ExtraExecOutputPinWidget);
+					UTurinmaPinClickablePanel* Border = WidgetTree->ConstructWidget<UTurinmaPinClickablePanel>(UTurinmaPinClickablePanel::StaticClass());
+					Border->PinKind = ETurinmaPinKind::ExecOutput;
+					Border->Index = NOI;
+					Border->OnHovered.AddUniqueDynamic(this, &UTurinmaGraphNodeBaseWidget::OnPinHovered);
+					Border->OnUnhovered.AddUniqueDynamic(this, &UTurinmaGraphNodeBaseWidget::OnPinUnhovered);
+					Border->OnMouseButtonDownEventWithWidget.BindDynamic(this, &UTurinmaGraphNodeBaseWidget::OnPinDown);
+					Border->OnMouseButtonUpEventWithWidget.BindDynamic(this, &UTurinmaGraphNodeBaseWidget::OnPinUp);
+					Border->Background.DrawAs = ESlateBrushDrawType::NoDrawType;
+					ExtraExecOutputContainer->AddChild(Border);
+					Cast<UBorderSlot>(Border->AddChild(ExtraExecOutputPinWidget))->SetPadding({});
 					ExtraExecOutputPinWidgets.Add(ExtraExecOutputPinWidget);
 				}
 			}
@@ -131,7 +163,17 @@ void UTurinmaGraphNodeBaseWidget::InitData()
 				for (auto&& Item : InDesc)
 				{
 					auto* IW = WidgetTree->ConstructWidget<UWidget>(InClass);
-					Container->AddChildToVerticalBox(IW);
+
+					UTurinmaPinClickablePanel* Border = WidgetTree->ConstructWidget<UTurinmaPinClickablePanel>(UTurinmaPinClickablePanel::StaticClass());
+					Border->PinKind = InPinKind;
+					Border->Index = InWidgts.Num();
+					Border->OnHovered.AddUniqueDynamic(this, &UTurinmaGraphNodeBaseWidget::OnPinHovered);
+					Border->OnUnhovered.AddUniqueDynamic(this, &UTurinmaGraphNodeBaseWidget::OnPinUnhovered);
+					Border->OnMouseButtonDownEventWithWidget.BindDynamic(this, &UTurinmaGraphNodeBaseWidget::OnPinDown);
+					Border->OnMouseButtonUpEventWithWidget.BindDynamic(this, &UTurinmaGraphNodeBaseWidget::OnPinUp);
+					Border->Background.DrawAs = ESlateBrushDrawType::NoDrawType;
+					Container->AddChildToVerticalBox(Border);
+					Cast<UBorderSlot>(Border->AddChild(IW))->SetPadding({});
 					InWidgts.Add(IW);
 				}
 			}
@@ -259,6 +301,28 @@ FVector2D UTurinmaGraphNodeBaseWidget::GetParamOutputPositionInPanel(const UWidg
 		return GetWidgetLocationInOtherWidget(ParamOutputWidget[Index], RelativeToWidget, Center);
 	}
 	return GetWidgetLocationInOtherWidget(this, RelativeToWidget, Center);
+}
+
+void UTurinmaGraphNodeBaseWidget::OnPinHovered(UTurinmaClickableContentPanel* Panel, const FGeometry& MyGeometry,
+	const FPointerEvent& MouseEvent)
+{
+}
+
+void UTurinmaGraphNodeBaseWidget::OnPinUnhovered(UTurinmaClickableContentPanel* Panel, const FPointerEvent& MouseEvent)
+{
+
+}
+
+FEventReply UTurinmaGraphNodeBaseWidget::OnPinDown(UTurinmaClickableContentPanel* Panel, const FGeometry& MyGeometry,
+	const FPointerEvent& MouseEvent)
+{
+	return false;
+}
+
+FEventReply UTurinmaGraphNodeBaseWidget::OnPinUp(UTurinmaClickableContentPanel* Panel, const FGeometry& MyGeometry,
+	const FPointerEvent& MouseEvent)
+{
+	return false;
 }
 
 void FTurinmaGraphDataRedoUndoItem::AddStructReferencedObjects(FReferenceCollector& Collector)
