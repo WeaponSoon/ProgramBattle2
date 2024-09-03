@@ -17,7 +17,7 @@ void UUETypeDescContainer::AddReferencedObjects(UObject* InThis, FReferenceColle
     {
         if (It->Value.GetRefCount() == 1)
         {
-            Collector.MarkWeakObjectReferenceForClearing(&It->Value->UserDefinedTypePointer.Pointer);
+            Collector.MarkWeakObjectReferenceForClearing(&It->Value->UserDefinedTypePointer.Pointer, InThis);
         }
         else
         {
@@ -124,7 +124,7 @@ void FTypeDesc::AddReferencedObject(UObject* Oter, void* PtrToValue, FReferenceC
         }
         else
         {
-            Collector.MarkWeakObjectReferenceForClearing((UObject**)PtrToValue);
+            Collector.MarkWeakObjectReferenceForClearing((UObject**)PtrToValue, Oter);
         }
     }
     return;

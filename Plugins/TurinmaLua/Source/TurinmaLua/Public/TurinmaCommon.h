@@ -2,21 +2,6 @@
 
 #include "CoreMinimal.h"
 
-class FAR
-{
-public:
-	void F()
-	{
-		typedef typename TChooseClass<
-			FDefaultAllocator::NeedsElementType,
-			typename FDefaultAllocator::template ForElementType<FString>,
-			typename FDefaultAllocator::ForAnyElementType
-		>::Result ElementAllocatorType;
-		ElementAllocatorType AllocatorInstance;
-
-		
-	}
-};
 
 template <typename InElementType, typename SizeType = int32>
 class TTurinmaCircularQueue

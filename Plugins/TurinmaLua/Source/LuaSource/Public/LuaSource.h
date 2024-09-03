@@ -330,7 +330,7 @@ public:
 	{
 		auto* This = CastChecked<ATestWeakRefPtr>(InThis);
 		Collector.AddReferencedObject(This->ObjTest);
-		Collector.MarkWeakObjectReferenceForClearing(&This->WeakObjTest);
+		Collector.MarkWeakObjectReferenceForClearing(&This->WeakObjTest, InThis);
 	}
 
 };

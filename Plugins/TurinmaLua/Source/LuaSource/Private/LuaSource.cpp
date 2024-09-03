@@ -840,7 +840,7 @@ void FLuaUObjectData::AddReferencedObjects(UObject* Owner, FReferenceCollector& 
     }
     else
     {
-        Collector.MarkWeakObjectReferenceForClearing(&Object);
+        Collector.MarkWeakObjectReferenceForClearing(&Object, Owner);
     }
 }
 
